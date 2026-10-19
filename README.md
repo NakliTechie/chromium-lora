@@ -115,7 +115,9 @@ LoRA works.
   models/gemma-4-E2B-it-gpu.litertlm examples/adapters/map.json 9401 2026.8.7.929
 
 # terminal 2 — Chromium also stays running; drive it from a third shell
-chromium --headless=new --remote-debugging-port=9352 \
+# set CHROME to a Chromium/Chrome binary; there is no bare `chromium` on macOS
+CHROME="${CHROME:-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome}"
+"$CHROME" --headless=new --remote-debugging-port=9352 \
   --host-resolver-rules="MAP site-a.example 127.0.0.1, MAP site-b.example 127.0.0.1, MAP site-c.example 127.0.0.1" \
   http://site-a.example:9401/
 

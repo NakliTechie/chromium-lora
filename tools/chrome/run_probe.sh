@@ -37,6 +37,9 @@ for disposable in "$PROFILE" "$CRASH_DIR"; do
     /tmp/*) ;;
     *) echo "refusing to delete '$disposable': probe paths must live under /tmp" >&2; exit 2 ;;
   esac
+  case "$disposable" in
+    *..*) echo "refusing to delete '$disposable': path traversal not allowed" >&2; exit 2 ;;
+  esac
 done
 
 # LanguageModel is [SecureContext] in the IDL, so the page must have a trustworthy

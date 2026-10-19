@@ -73,9 +73,10 @@ async function main() {
   const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
   const send = cdp(ws);
-  await send("Page.enable");
 
   try {
+    await send("Page.enable");
+
     for (const [name, html] of CARDS) {
       const h = name === "title" ? 1080 : 80;
       await send("Emulation.setDeviceMetricsOverride", {

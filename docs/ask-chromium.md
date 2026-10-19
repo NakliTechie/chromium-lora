@@ -15,8 +15,7 @@ and the published engine. Two things are missing, and this note is only about th
 ours.** With `--optimization-guide-manifest-override` pointing at a local manifest and at
 `gemma-4-E2B-it-gpu.litertlm` as the base model's weights, Chrome 155.0.8059.84 headless still
 reports `LanguageModel.availability() === "unavailable"`. An instrumented run
-(`--enable-logging=stderr --v=1`) shows the service is alive rather than compiled out —
-`optimization_guide available: true` — and answering our prompt the browser says:
+(`--enable-logging=stderr --v=1`), answering our prompt the browser says:
 
 ```
 The model was available but there was not an execution config available for the feature.
@@ -146,7 +145,7 @@ struct ModelSubscriptionOptions {
 ```
 
 `use_case` is the only key. The broker resolves it to one solution via
-`DeviceCategoryConfig.use_cases[use_case].solution_recipe_id` (`manifest.proto:130`), so every
+`DeviceCategoryConfig.use_cases[use_case].solution_recipe_id` (`manifest.proto:130`, `:133`, `:158`), so every
 caller on the device asking for the same use case gets the same `ModelSolution`, chosen once per
 device category.
 

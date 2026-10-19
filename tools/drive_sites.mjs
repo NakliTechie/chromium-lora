@@ -58,13 +58,13 @@ async function main() {
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
   const send = cdp(ws);
 
-  await send("Page.enable");
-  await send("Runtime.enable");
-  await send("Emulation.setDeviceMetricsOverride", {
-    width: 1180, height: 820, deviceScaleFactor: 2, mobile: false,
-  });
-
   try {
+    await send("Page.enable");
+    await send("Runtime.enable");
+    await send("Emulation.setDeviceMetricsOverride", {
+      width: 1180, height: 820, deviceScaleFactor: 2, mobile: false,
+    });
+
     for (const [name, host] of STEPS) {
       const url = `http://${host}:${basePort}/`;
       await send("Page.navigate", { url });

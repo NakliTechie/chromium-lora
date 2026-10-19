@@ -493,14 +493,14 @@ Two candidate explanations for the missing execution config, and I could not sep
 
 1. The manifest path was never read. `CreateManifestDelegate()` — the function that reads
    `--optimization-guide-manifest-override` — sits inside
-   `#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:53`), which
+   `#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:39`), which
    would make the override inert regardless of what the manifest contains. **Unverified.**
-2. The manifest was read, but the feature config it names for the requested capability was missing
-   or carried no `default_use_case`. Our own patcher stages only the manifest and the adapter; it
-   does not stage the sibling `*_solution_config.binarypb` files a manifest references, and moving
-   the patched manifest into its own directory (as this harness must, because Chromium appends
-   `manifest.binarypb` to `manifest_path`) separates it further from those siblings. **Our bug, and
-   the first thing to check.**
+2. The manifest was read, but the feature config for the requested capability is missing,
+   unparseable, or carries no `default_use_case`. `DeviceCategoryConfig.feature_configs` is a
+   **map declared inline** in the manifest (`manifest.proto:163`), not a pointer to a sibling file,
+   so a missing `*_solution_config.binarypb` does not explain this particular error. Whether our
+   override populated `feature_configs` for the capability we requested is the open question, and
+   it is checkable by decoding the manifest we generated.
 
 **Why I stopped rather than continuing.** The Chromium source tree was on an intermittently failing
 external drive. Three identical greps for `USE_ON_DEVICE_MODEL_SERVICE` under `chrome/` returned

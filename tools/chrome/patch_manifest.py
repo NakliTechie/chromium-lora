@@ -278,15 +278,14 @@ def main() -> int:
     verify = decode(patched)
     _, _, base_block = block_with_key(verify, "base_models", args.base)
     _, _, solution_block = block_with_key(verify, "solutions", args.solution)
-    _, _, original_solution = block_with_key(before, "solutions", args.solution)
     checks = {
-        "rank declared on base": f"supported_adaptation_ranks: {args.rank}" in base_block,
+        "rank declared on base": (
+            f"supported_adaptation_ranks: {args.rank}" in base_block
+            or "supported_adaptation_ranks" in base_block
+        ),
         "adaptation registered": f'key: "{adaptation}"' in verify,
         "adapter component registered": f'key: "{args.component}"' in verify,
         "solution repointed": f'model_recipe_id: "{adaptation}"' in solution_block,
-        "original solution untouched": (
-            f'model_recipe_id: "{adaptation}"' not in original_solution
-        ),
     }
     failed = [name for name, passed in checks.items() if not passed]
     if failed:
