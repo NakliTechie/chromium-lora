@@ -156,7 +156,9 @@ node tools/drive_sites.mjs 9352 9401 out/frames
 ```
 
 The three hostnames are from the RFC 2606 reserved `.example` space, so they cannot collide with a
-real site. The point of `--host-resolver-rules` is that each is a genuine origin: the page cannot
+real site, and the three personas in `examples/adapters/` are invented — a CLI tool's documentation
+site, a kettle retailer, and a speech-research lab. They exist so the per-origin difference is
+visible against one shared base, and you can replace them with anything you like. The point of `--host-resolver-rules` is that each is a genuine origin: the page cannot
 choose or influence which adapter it gets, and the server keys on the `Host` header alone. It is
 told which adapter was selected — the id is in the page header — but a page served from one origin
 gets that origin's adapter. A page may still fire a request at another origin, but the browser
