@@ -16,6 +16,7 @@ This is a research fork against Chromium **155.0.8059.84**, not a product.
 
 | Step | State |
 |---|---|
+| Chromium 155.0.8059.84 builds from the fork's tree (M0) | Passes: `autoninja -C out/Default chrome` exit 0 on 2026-10-19 |
 | Backend library, tested outside Chromium (M1) | Passes, see below |
 | Chromium loads the library and answers the Prompt API (M2) | Not started |
 | Adapter chosen per origin, model version visible to the page (M3) | Not started |
