@@ -7,6 +7,36 @@ Everything here uses public material only: the `litert-lm` wheel from PyPI, publ
 Hugging Face, and Chromium's own `components/optimization_guide/proto/manifest.proto`. No patched
 browser and no private build is required to reproduce any of it.
 
+## What you would actually run
+
+**You do not need to compile Chromium.** Nobody has to. Start here if you only want to check the
+central claim:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install litert-lm    # one wheel from PyPI
+mkdir -p models && curl -L -o models/gemma-4-E2B-it-gpu.litertlm \
+  https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm
+
+.venv/bin/python tools/artisan_test.py models/gemma-4-E2B-it-gpu.litertlm 16
+```
+
+That is a 2 GB download and a few minutes on an Apple Silicon Mac. It prints the selected backend,
+whether the LoRA rank was honoured, and the model's answer. No browser of any kind.
+
+Then decide what you need:
+
+| If you want to… | What it costs |
+|---|---|
+| Read the two asks | Nothing. [`docs/ask-chromium.md`](docs/ask-chromium.md) |
+| Check the engine claims above | `pip install litert-lm` + a 2 GB public model |
+| See per-origin adapters dispatch | The same, plus a local server and any Chrome/Chromium binary |
+| Reproduce the Chrome-side negative result | A Chromium **checkout** for `manifest.proto` and `protoc` |
+
+The last row is the only thing that touches Chromium at all, and it needs the source tree — not a
+build of it. It exists to reproduce one negative result, and that result was retracted twice on the
+way to being stated correctly, so treat it as the weakest material here. Everything else stands on
+engine output you can re-run yourself.
+
 ## The short version
 
 LiteRT-LM can do this already:
@@ -100,9 +130,9 @@ Look for one `LoadLoRA()` trace per `lora_path` in stderr.
 ## The per-origin demo
 
 `tools/site_server.py` holds the engine and dispatches by the HTTP `Host` header. We did this
-because the manifest broker produced no output at all in our Chrome 155 and Chromium fork runs, and
-we did not establish why — the diagnosis is open, so treat that as an observation rather than a
-conclusion about branded builds. See [`docs/findings.md`](docs/findings.md) §11.
+because of what Chrome reported back, which we read incorrectly twice before getting it right — see
+§11. The current reading is that the per-feature config produced no `default_use_case`, which is
+raised before any model is resolved. See [`docs/findings.md`](docs/findings.md) §11.
 
 **Be clear about what this demonstrates.** The adapter payload is a JSON instruction applied as a
 user turn whose response is discarded, **not** a real LoRA container. It exists to show the dispatch shape: one shared base,
@@ -116,7 +146,7 @@ LoRA works.
 
 # terminal 2 — Chromium also stays running; drive it from a third shell
 # set CHROME to a Chromium/Chrome binary; there is no bare `chromium` on macOS
-CHROME="${CHROME:-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome}"
+CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 "$CHROME" --headless=new --remote-debugging-port=9352 \
   --host-resolver-rules="MAP site-a.example 127.0.0.1, MAP site-b.example 127.0.0.1, MAP site-c.example 127.0.0.1" \
   http://site-a.example:9401/
@@ -129,7 +159,9 @@ The three hostnames are from the RFC 2606 reserved `.example` space, so they can
 real site. The point of `--host-resolver-rules` is that each is a genuine origin: the page cannot
 choose or influence which adapter it gets, and the server keys on the `Host` header alone. It is
 told which adapter was selected — the id is in the page header — but a page served from one origin
-gets that origin's adapter and no way to ask for another's.
+gets that origin's adapter. A page may still fire a request at another origin, but the browser
+blocks it from reading the response — the demo server sends no `Access-Control-Allow-Origin`, so
+there is no cross-origin read path to another site's adapter.
 
 Version pinning is real and enforced server-side — an adapter whose `target_version` differs from
 the loaded model is refused rather than silently used:

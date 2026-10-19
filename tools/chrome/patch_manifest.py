@@ -35,7 +35,7 @@ Usage:
         --base gemma4_gpu_high_tier_model --solution prompt_gemma4_gpu_high_tier_solution \\
         --adapter /path/to/adapter.bin --rank 16 [--solution-config <name>.binarypb]
 
-Writes <out-dir>/manifest.patched.binarypb, <out-dir>/override.json, and prints a
+Writes <out-dir>/patched_manifest/manifest.binarypb, <out-dir>/override.json, and prints a
 diff summary. Does not touch the source manifest or the Chrome profile.
 """
 
@@ -124,6 +124,13 @@ def block_with_key(text: str, collection: str, key: str) -> tuple[int, int, str]
 def add_supported_ranks(text: str, base: str, rank: int) -> str:
     start, end, body = block_with_key(text, "base_models", base)
     if "supported_adaptation_ranks" in body:
+        declared = body.split("supported_adaptation_ranks", 1)[1]
+        declared = declared.split("}", 1)[0]
+        if str(rank) not in declared:
+            raise SystemExit(
+                f"base {base!r} already declares supported_adaptation_ranks "
+                f"{declared.strip()!r}; refusing to override with {rank}"
+            )
         return text
     lines = body.splitlines()
     insert_at = None

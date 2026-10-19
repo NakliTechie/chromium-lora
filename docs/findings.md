@@ -407,7 +407,7 @@ built from the fragments `transformer.layer_`, `_w_prime_left_`, `_w_prime_right
 and `attn_vec_einsum` also present as bare names. For Gemma 4 E2B: **35 layers (0–34), four
 projections, two sides = 280 tensors.**
 
-**The container is a protobuf**, `third_party/odml/infra/genai/inference/proto/llm_file_metadata.proto`,
+**We recovered a protobuf schema** the loader references, `third_party/odml/infra/genai/inference/proto/llm_file_metadata.proto`,
 package `odml.infra.proto`:
 
 ```

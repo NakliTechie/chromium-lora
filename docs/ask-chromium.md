@@ -126,8 +126,8 @@ that already exists. None of the repositories we found emits one of these adapte
 We should be precise about what that shows. It is a negative search result across the code we could
 reach, not a proof that no producer exists anywhere. We did not inspect the two model repositories
 that ship a LoRA-bearing adapter, because both are gated. So the claim we can defend is "we could not
-find a producer, and the consumer API is public while the producer format is not" — not "no one can
-build one."
+find a producer, and the consuming API is public" — not "no one can build one", and not "the
+producer format is private". We did not look in Google's internal code."
 
 If that holds, the producer side needs a documented format rather than a doc fix, which is why we
 are asking rather than filing again.

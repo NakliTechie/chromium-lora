@@ -52,8 +52,8 @@ echo "== model ok ($actual bytes) =="
 if [ "$TWO_ADAPTERS" = "1" ]; then
   # Placeholder adapters: they are rejected at the flatbuffer check, which is the point -
   # each one still reaches the loader, which is what proves per-session dispatch.
-  a=$(mktemp /tmp/adapterA.XXXXXX.bin)
-  b=$(mktemp /tmp/adapterB.XXXXXX.bin)
+  a=$(mktemp /tmp/lora-probe-adapterA.XXXXXX)
+  b=$(mktemp /tmp/lora-probe-adapterB.XXXXXX)
   python3 -c "open('$a','wb').write(bytes(2*1024*1024))"
   python3 -c "open('$b','wb').write(bytes(2*1024*1024))"
   trap 'rm -f "$a" "$b"' EXIT

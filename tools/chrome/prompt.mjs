@@ -119,10 +119,24 @@ const main = async () => {
   const page = await newPage(url);
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
-    ws.addEventListener("open", resolve, { once: true });
-    ws.addEventListener("error", () => reject(new Error("cdp socket error")), {
-      once: true,
-    });
+    const timer = setTimeout(() => {
+      // A socket that never handshakes still holds the event loop open, so the
+      // process would hang after reporting the timeout.
+      try {
+        ws.close();
+      } catch {}
+      reject(new Error(`cdp socket did not open within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const done = (fn) => (arg) => {
+      clearTimeout(timer);
+      fn(arg);
+    };
+    ws.addEventListener("open", done(resolve), { once: true });
+    ws.addEventListener(
+      "error",
+      done(() => reject(new Error("cdp socket error"))),
+      { once: true },
+    );
   });
   try {
     const out = await evaluate(ws, source);

@@ -34,8 +34,8 @@ CHROME_PID=""
 
 for disposable in "$PROFILE" "$CRASH_DIR"; do
   case "$disposable" in
-    /tmp/*) ;;
-    *) echo "refusing to delete '$disposable': probe paths must live under /tmp" >&2; exit 2 ;;
+    /tmp/lora-probe-*) ;;
+    *) echo "refusing to delete '$disposable': not a probe path (/tmp/lora-probe-*)" >&2; exit 2 ;;
   esac
   case "$disposable" in
     *..*) echo "refusing to delete '$disposable': path traversal not allowed" >&2; exit 2 ;;
