@@ -21,9 +21,9 @@ product needs, and it exists today in a public package.
 Two things stop it being useful:
 
 1. **We could not produce a valid adapter file.** The format is mostly recoverable from the
-   published binary, but the container also has to embed a valid TFLite model, and we could not
-   work out what that half contains or how a third party emits it. Two attempts to derive one both
-   failed, and we found no public example. See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 1.
+   published binary, but it appears to need more than the metadata protobuf — an embedded TFLite
+   model is our best guess, and we could not work out what that half contains or how a third party
+   emits it. Two attempts to derive one both failed, and we found no public example. See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 1.
 2. **Chromium has nowhere to put the caller's identity.** `ModelSubscriptionOptions` carries only
    `use_case`, so every caller on a device asking for the same use case gets the same solution.
    See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 2.

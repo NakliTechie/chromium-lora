@@ -75,20 +75,23 @@ async function main() {
   const send = cdp(ws);
   await send("Page.enable");
 
-  for (const [name, html] of CARDS) {
-    const h = name === "title" ? 1080 : 80;
-    await send("Emulation.setDeviceMetricsOverride", {
-      width: 1920, height: h, deviceScaleFactor: 1, mobile: false,
-    });
-    await send("Page.navigate", { url: "about:blank" });
-    await sleep(300);
-    await send("Runtime.evaluate", { expression: `document.open();document.write(${JSON.stringify(html)});document.close()` });
-    await sleep(1200);
-    const shot = await send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(`${outDir}/${name}.png`, Buffer.from(shot.data, "base64"));
-    console.log("card:", name);
+  try {
+    for (const [name, html] of CARDS) {
+      const h = name === "title" ? 1080 : 80;
+      await send("Emulation.setDeviceMetricsOverride", {
+        width: 1920, height: h, deviceScaleFactor: 1, mobile: false,
+      });
+      await send("Page.navigate", { url: "about:blank" });
+      await sleep(300);
+      await send("Runtime.evaluate", { expression: `document.open();document.write(${JSON.stringify(html)});document.close()` });
+      await sleep(1200);
+      const shot = await send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(`${outDir}/${name}.png`, Buffer.from(shot.data, "base64"));
+      console.log("card:", name);
+    }
+  } finally {
+    ws.close();
   }
-  ws.close();
 }
 
 main().catch((e) => {

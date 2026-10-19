@@ -64,20 +64,23 @@ async function main() {
     width: 1180, height: 820, deviceScaleFactor: 2, mobile: false,
   });
 
-  for (const [name, host] of STEPS) {
-    const url = `http://${host}:${basePort}/`;
-    await send("Page.navigate", { url });
-    await sleep(2500);
-    await send("Runtime.evaluate", {
-      expression: "document.querySelector('button').click()",
-      awaitPromise: true,
-    });
-    await sleep(6000);
-    const shot = await send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(`${outDir}/${name}.png`, Buffer.from(shot.data, "base64"));
-    console.log(`captured ${name}  ${url}`);
+  try {
+    for (const [name, host] of STEPS) {
+      const url = `http://${host}:${basePort}/`;
+      await send("Page.navigate", { url });
+      await sleep(2500);
+      await send("Runtime.evaluate", {
+        expression: "document.querySelector('button').click()",
+        awaitPromise: true,
+      });
+      await sleep(6000);
+      const shot = await send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(`${outDir}/${name}.png`, Buffer.from(shot.data, "base64"));
+      console.log(`captured ${name}  ${url}`);
+    }
+  } finally {
+    ws.close();
   }
-  ws.close();
 }
 
 main().catch((e) => {

@@ -22,20 +22,23 @@ reports `LanguageModel.availability() === "unavailable"`. An instrumented run
 The model was available but there was not an execution config available for the feature.
 ```
 
-So the override was not ignored and a model did resolve. The gap is between *a model resolves* and
-*an execution config exists for the requested feature*. We do not know whether that is because the
-manifest path is gated — `CreateManifestDelegate()`, which reads that switch, sits inside
-`#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:53`) — or because
-nothing supplied a config for the feature we asked for. Treat this as a question. **If the
-override does not work in shipping Chrome, then the answer to "how would a third party supply a
+That message is user-facing prose and does not mean what it looks like. In
+`chrome/browser/ai/ai_manager.cc` the path is `GetConfig(capability)` →
+`GetUseCaseFromFeatureConfig(wrapper)`, and if that returns nothing the browser returns
+`kUnavailableConfigNotAvailableForFeature` **before** it ever calls
+`GetSubscriber(*use_case).CanCreateSession`. So no model was resolved, and nothing here shows the
+override was read. The question is narrower than it looks: does the per-feature config exist, does
+it parse, and does it set `default_use_case`? **If the override does not work in shipping Chrome, then the answer to "how would a third party supply a
 local model or an adaptation?" is "they cannot", and that is worth knowing.** We have a Chromium
 fork built and could use it to test the hypothesis.
 
 Two smaller notes in the same vein: our first harness keyed the override's `components` map by
 component name when the delegate looks up `public_key_hex + ":" + target_version`, which silently
-resolves nothing — worth knowing if others have tried this. And `chrome://on-device-internals` is
-compiled out of the build we tested ("Internal debugging pages are currently disabled"), so we had
-no supported way to ask the browser why availability was what it was.
+resolves nothing — worth knowing if others have tried this. And `chrome://on-device-internals` was
+unavailable to us — the build printed "Internal debugging pages are currently disabled", which is a
+preference-controlled restriction (there is a toggle at `chrome://chrome-urls`) and not proof the
+page is absent from the build — so we had no supported way to ask the browser why availability was
+what it was.
 
 ## What we built
 
@@ -98,8 +101,10 @@ point, padded to 16384 — and it still failed with:
 Input is not valid flatbuffer model. Deobfuscation is not supported yet.
 ```
 
-So the file is the metadata protobuf **plus an embedded tflite model**, and we are missing the
-second half. **What is that model meant to contain, and how is a third party expected to produce
+Our working assumption is that the file is the metadata protobuf **plus an embedded tflite model**,
+and that we are missing the second half. The assumption fits the failure — a hand-built protobuf is
+rejected by flatbuffer validation — but rejection only tells us our bytes were wrong, not that this
+particular layout is required. **What is that model meant to contain, and how is a third party expected to produce
 it?** The tensors carry `dimensions` and `transpose_axes`. Separately the binary contains
 `Divisor must be a power of 2`, which hints at quantised weights somewhere on the path, but we
 could not tie that string to the adapter loader specifically, so treat it as a hint rather than a
@@ -109,8 +114,8 @@ flatbuffer validation, and that a hand-built protobuf did not satisfy it.
 Two further attempts to derive it from public material dead-ended: a search of the public
 LiteRT-LM sources and documentation for the format, and a direct attempt to construct a container
 against the recovered spec and get `LoadLoRA()` to accept it. Neither produced a loadable adapter.
-So we are treating the second half as genuinely undocumented rather than merely under-documented,
-and this ask is the thing that unblocks us.
+So we are treating the second half as something we could not locate rather than something we
+merely skimmed past, and this ask is the thing that unblocks us.
 
 The sharper version: **this may not be only us.** Searching public GitHub for the container's own
 vocabulary returned nothing — `LlmFileMetadata` has zero hits, and so does `w_prime_left`.

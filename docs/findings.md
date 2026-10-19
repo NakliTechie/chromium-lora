@@ -250,8 +250,8 @@ driver. All of it died. Rebuilt in `tools/chrome/` from public material only [so
 The override is a **plain JSON file**, not a binary [source]:
 
 ```json
-{ "manifest_path": "<local manifest.binarypb>",
-  "components": { "<component>": { "<version>": "<local path>" } } }
+{ "manifest_path": "<directory containing manifest.binarypb>",
+  "components": { "<public-key-hex>": { "<version>": "<local directory>" } } }
 ```
 
 `OnAssetReady` is then called with that local path, so **a model we produced ourselves can be served
@@ -430,7 +430,7 @@ LoRA tensor size mismatch after conversion:
 
 I hand-built a protobuf to that spec — 280 tensors, rank 16, offsets back-patched to a
 fixed point, padded to 16384 — and it still failed with `The model is not a valid Flatbuffer
-buffer`. So the format is **the metadata protobuf *and* an embedded tflite model**, not metadata
+buffer`. Our working assumption is **the metadata protobuf *and* an embedded tflite model**, not metadata
 alone. Building a valid tflite that the loader accepts is a larger job than an unattended night
 should absorb, so I stopped and wrote this down instead.
 
@@ -456,57 +456,71 @@ as the base recipe's `weights.bin`, Chrome 155.0.8059.84 headless still reports:
 { "ok": false, "error": "LanguageModel.availability() === unavailable" }
 ```
 
-**Correction.** An earlier revision of this section concluded the broker produced no output at all
-and that the service was probably compiled out. That was wrong, and the preserved logs contradict
-it. Properly instrumented (`--enable-logging=stderr --v=1`), the log contains:
-
-```
-[PermissionsAI] PredictionModelHandlerProvider ctor optimization_guide available: true
-```
-
-and, answering our prompt from the page itself:
+**Correction.** An earlier revision of this section concluded the broker produced no output at all,
+and a second revision concluded the model resolved but an execution config was missing. **Both are
+wrong.** The browser's message, answering our prompt from the page itself, is:
 
 ```
 The model was available but there was not an execution config available for the feature.
 ```
 
-So the broker side was alive, `optimization_guide` was available, and the model was resolved as
-available. What was missing is an **execution config**. Absent verbose-log lines from the broker do
-not establish broker inactivity, because that subsystem reports through `TRACE_EVENT` rather than
-through `--v=1` logging. [run]
+That message is user-facing prose and does not mean what it appears to mean. Reading
+`chrome/browser/ai/ai_manager.cc` on this checkout, the path is:
 
-**What this means.** The blocker is narrower than "Chrome cannot load a manifest model". It is
-closer to "Chrome resolved a model but had no execution config for the feature we asked for". That
-is a more specific question to put to the team, and it is the question §11 of the ask now asks.
+```
+GetConfig(capability)                      → fetch the per-feature config
+FinishCanCreateSessionWithConfig:
+  use_case = GetUseCaseFromFeatureConfig(wrapper)
+  if (!use_case || use_case->empty())  →  kUnavailableConfigNotAvailableForFeature, return
+model_broker_client_->GetSubscriber(*use_case).CanCreateSession(...)   ← never reached
+```
+
+`GetUseCaseFromFeatureConfig` (`ai_manager.cc:365`) returns nullopt when the feature config cannot
+be parsed, and otherwise returns `feature_config->default_use_case()`. So the error means **the
+feature config was missing, unparseable, or had no `default_use_case` set** — it is raised *before*
+any model is resolved. Nothing here shows that a model was found, and nothing shows the manifest
+override was read. [run]
+
+The `optimization_guide available: true` line in the same log is a PermissionsAI message about a
+prediction-model provider, not evidence about this override.
+
+**What this means.** The blocker is narrower and more tractable than "Chrome cannot load a manifest
+model", and it is a config-shape problem rather than a service-availability problem. The first
+thing to check is whether the feature config the manifest points at exists, is readable, and sets
+`default_use_case`.
 
 Two candidate explanations for the missing execution config, and I could not separate them:
 
-1. The manifest path was never read, so no config was ever produced. `CreateManifestDelegate()` — the
-   function that reads `--optimization-guide-manifest-override` — sits inside
+1. The manifest path was never read. `CreateManifestDelegate()` — the function that reads
+   `--optimization-guide-manifest-override` — sits inside
    `#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:53`), which
-   would make the override inert regardless of what the manifest contains.
-   **Unverified.**
-2. The manifest was read and a model resolved, but nothing supplied an execution config for the
-   feature being requested. The availability enum has a `kFeatureNotEnabled` reason, and the prompt
-   API's `RuntimeEnabled=AIPromptAPI` is separate from whatever starts the broker.
-   **Unverified.**
+   would make the override inert regardless of what the manifest contains. **Unverified.**
+2. The manifest was read, but the feature config it names for the requested capability was missing
+   or carried no `default_use_case`. Our own patcher stages only the manifest and the adapter; it
+   does not stage the sibling `*_solution_config.binarypb` files a manifest references, and moving
+   the patched manifest into its own directory (as this harness must, because Chromium appends
+   `manifest.binarypb` to `manifest_path`) separates it further from those siblings. **Our bug, and
+   the first thing to check.**
 
 **Why I stopped rather than continuing.** The Chromium source tree was on an intermittently failing
 external drive. Three identical greps for `USE_ON_DEVICE_MODEL_SERVICE` under `chrome/` returned
 5, 1 and 7 files, and a sanity grep for `Artifact` in `chrome/BUILD.gn` — a file that certainly
-exists — returned a read failure. Any conclusion drawn from that drive's I/O at this point would
-be unsound, so I stopped and wrote the negative result down instead. It needs a healthy source tree
-to finish.
+exists — returned a read failure. Any conclusion drawn from that drive's I/O at that point would
+have been unsound, so I stopped rather than guess.
+
+It has since recovered, and the reads above were taken from it after three identical greps returned
+the same count. That is why `ai_manager.cc` is quoted here and the earlier hypotheses were not:
+a source line is checkable, a grep count on a failing disk is not.
 
 **One earlier measurement of mine was itself invalid** and is worth not repeating: the first
 "zero broker lines" reading came from a launch where I had omitted `--enable-logging=stderr --v=1`,
 so nothing would have been logged at all. The figure above is from a correctly instrumented run. Do
 not confuse the two.
 
-**For the Chrome team this is the most interesting thing in the note.** The model was reported
-available and `optimization_guide` was reported available, so the override was not simply ignored.
-The gap is between "a model resolves" and "an execution config exists for the requested feature",
-and that is where we would like to be pointed.
+**For the Chrome team this is the most interesting thing in the note.** The error is raised at a
+specific, readable place: `GetUseCaseFromFeatureConfig` returned nothing, so the browser bailed
+before resolving a model. That points at config shape — does the config exist, does it parse, does
+it set `default_use_case` — rather than at service availability.
 
 ## Provenance
 

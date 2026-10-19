@@ -30,6 +30,14 @@ CRASH_DIR=${LORA_PROBE_CRASH_DIR:-/tmp/lora-probe-crash}
 PORT=${LORA_PROBE_CDP_PORT:-9333}
 PAGE_DIR=/tmp/lora-probe-page
 HTTP_PORT=${LORA_PROBE_HTTP_PORT:-9334}
+CHROME_PID=""
+
+for disposable in "$PROFILE" "$CRASH_DIR"; do
+  case "$disposable" in
+    /tmp/*) ;;
+    *) echo "refusing to delete '$disposable': probe paths must live under /tmp" >&2; exit 2 ;;
+  esac
+done
 
 # LanguageModel is [SecureContext] in the IDL, so the page must have a trustworthy
 # origin. Pointing Chrome at a dead localhost port lands on chrome-error:// with a
@@ -44,12 +52,6 @@ python3 -m http.server "$HTTP_PORT" --bind 127.0.0.1 --directory "$PAGE_DIR" \
 HTTP_PID=$!
 trap 'kill "$CHROME_PID" "$HTTP_PID" 2>/dev/null' EXIT INT TERM
 
-for disposable in "$PROFILE" "$CRASH_DIR"; do
-  case "$disposable" in
-    /tmp/*) ;;
-    *) echo "refusing to delete '$disposable': probe paths must live under /tmp" >&2; exit 2 ;;
-  esac
-done
 rm -rf -- "$PROFILE" "$CRASH_DIR"
 mkdir -p "$PROFILE" "$CRASH_DIR"
 : > "$ENGINE_LOG"

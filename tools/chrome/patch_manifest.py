@@ -7,7 +7,8 @@ it needs is public: the schema is
 the engine is handed the result by `OverrideManifestAssetManagerDelegate`, which
 reads a plain JSON file:
 
-    {"manifest_path": "...", "components": {"<name>": {"<version>": "<local path>"}}}
+    {"manifest_path": "<dir holding manifest.binarypb>",
+     "components": {"<public-key-hex>": {"<version>": "<local dir>"}}}
 
 Schema, verbatim from manifest.proto:
 
@@ -231,6 +232,14 @@ def main() -> int:
         default=None,
         help="component the base recipe resolves to, e.g. gemma4_component",
     )
+    parser.add_argument(
+        "--solution-config",
+        type=Path,
+        action="append",
+        default=[],
+        help="sibling *_solution_config.binarypb the manifest references; "
+             "copied next to the patched manifest, repeatable",
+    )
     parser.add_argument("--base-component-version", default="")
     parser.add_argument("--base-component-dir", type=Path, default=None)
     args = parser.parse_args()
@@ -284,11 +293,15 @@ def main() -> int:
         (args.out_dir / "manifest.roundtrip.txt").write_text(verify)
         raise SystemExit(f"manifest patch failed checks: {', '.join(failed)}")
 
+    for config in args.solution_config:
+        if not config.is_file():
+            raise SystemExit(f"solution config not found: {config}")
+        shutil.copyfile(config, patched_dir / config.name)
+
     staging = args.out_dir / "adapter_component"
     staging.mkdir(exist_ok=True)
     shutil.copyfile(args.adapter, staging / args.relative_path)
 
-    manifest_dir = args.manifest.parent
     # The override map is keyed by public-key hex + ":" + target_version, NOT by
     # component name. Keying it by name silently matches nothing, the broker never
     # resolves an asset, and the Prompt API reports "unavailable" for reasons that
@@ -311,7 +324,9 @@ def main() -> int:
     print(f"adapter   {staging / args.relative_path}")
     print(f"base      {args.base} rank {args.rank}")
     print(f"solution  {args.solution} -> {adaptation}")
-    print(f"manifest dir (for sibling solution configs): {manifest_dir}")
+    print(f"manifest dir: {patched_dir}")
+    for config in args.solution_config:
+        print(f"solution config staged: {config.name}")
     return 0
 
 
