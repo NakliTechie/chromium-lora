@@ -125,10 +125,18 @@ def add_supported_ranks(text: str, base: str, rank: int) -> str:
     if "supported_adaptation_ranks" in body:
         return text
     lines = body.splitlines()
-    insert_at = next(
-        (i for i, line in enumerate(lines) if line.strip().startswith("performance_hint")),
-        len(lines) - 1,
-    )
+    insert_at = None
+    for index, line in enumerate(lines):
+        if line.strip().startswith("value"):
+            depth = 0
+            for probe in range(index, len(lines)):
+                depth += lines[probe].count("{") - lines[probe].count("}")
+                if depth == 0:
+                    insert_at = probe
+                    break
+            break
+    if insert_at is None:
+        raise SystemExit(f"base_models entry {base!r} has no value message")
     lines.insert(insert_at, f"      supported_adaptation_ranks: {rank}")
     return "\n".join(text.splitlines()[:start] + lines + text.splitlines()[end:]) + "\n"
 

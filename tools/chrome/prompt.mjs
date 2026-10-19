@@ -55,7 +55,7 @@ function evaluate(ws, expression) {
       if (msg.error) reject(new Error(JSON.stringify(msg.error)));
       else if (msg.result?.exceptionDetails) {
         reject(new Error(JSON.stringify(msg.result.exceptionDetails)));
-      } else resolve(msg.result?.result);
+      } else resolve(msg.result?.result?.value);
     };
     ws.addEventListener("message", onMessage);
     ws.send(

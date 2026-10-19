@@ -2,8 +2,8 @@
 
 **For:** the Chromium / Chrome built-in AI team
 **Date:** 18 Oct 2026
-**Evidence:** [`261018-litert-lm-is-public-and-has-artisan.md`](261018-litert-lm-is-public-and-has-artisan.md) §9 has
-the runs, the log lines and the reproduction; **§11 is a blocker for us and may be one for you**
+**Evidence:** [`findings.md`](findings.md) §9 has the runs, the log lines and the reproduction;
+**§11 is a blocker for us and may be one for you**
 
 ## Where this stands
 
@@ -96,9 +96,11 @@ Input is not valid flatbuffer model. Deobfuscation is not supported yet.
 
 So the file is the metadata protobuf **plus an embedded tflite model**, and we are missing the
 second half. **What is that model meant to contain, and how is a third party expected to produce
-it?** The tensors carry `dimensions` and `transpose_axes`, and the weights are quantised
-(`Divisor must be a power of 2`), which suggests the tflite is a small graph the loader reads
-rather than plain weights — but that is inference, not something we can confirm from strings.
+it?** The tensors carry `dimensions` and `transpose_axes`. Separately the binary contains
+`Divisor must be a power of 2`, which hints at quantised weights somewhere on the path, but we
+could not tie that string to the adapter loader specifically, so treat it as a hint rather than a
+statement about the adapter. What we can say firmly is only that the container is rejected by
+flatbuffer validation, and that a hand-built protobuf did not satisfy it.
 
 Two further attempts to derive it from public material dead-ended: a search of the public
 LiteRT-LM sources and documentation for the format, and a direct attempt to construct a container
@@ -106,16 +108,21 @@ against the recovered spec and get `LoadLoRA()` to accept it. Neither produced a
 So we are treating the second half as genuinely undocumented rather than merely under-documented,
 and this ask is the thing that unblocks us.
 
-The sharper version: **we are probably not the only ones stuck.** Searching public GitHub for the
-container's own vocabulary returns nothing at all — `LlmFileMetadata` has zero hits, and so does
-`w_prime_left`. Meanwhile `litert_lm_session_config_set_lora_path` does appear, in third-party
-bindings (react-native-litert-lm, swift-litert-lm), but only ever on the **consuming** side:
+The sharper version: **this may not be only us.** Searching public GitHub for the container's own
+vocabulary returned nothing — `LlmFileMetadata` has zero hits, and so does `w_prime_left`.
+Meanwhile `litert_lm_session_config_set_lora_path` does appear, in third-party bindings
+(react-native-litert-lm, swift-litert-lm), but only ever on the **consuming** side:
 `let status = litert_lm_session_config_set_lora_path(sessionConfig, loraPath)`, pointed at a file
-that already exists. Not one public repository emits one of these adapters.
+that already exists. None of the repositories we found emits one of these adapters.
 
-If that holds, the LoRA path is unusable for anyone outside Google today — a consumer API with no
-producer, and no schema to write one from. That is the part that seems worth a public format
-decision rather than a doc fix, and it is why we are asking rather than filing again.
+We should be precise about what that shows. It is a negative search result across the code we could
+reach, not a proof that no producer exists anywhere. We did not inspect the two model repositories
+that ship a LoRA-bearing adapter, because both are gated. So the claim we can defend is "we could not
+find a producer, and the consumer API is public while the producer format is not" — not "no one can
+build one."
+
+If that holds, the producer side needs a documented format rather than a doc fix, which is why we
+are asking rather than filing again.
 
 A documented example adapter, or a sentence on how to emit that model, would close this.
 

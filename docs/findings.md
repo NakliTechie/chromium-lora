@@ -1,9 +1,8 @@
 # LiteRT-LM is public, and the public build has the Artisan backend
 
 **Date:** 18 Oct 2026, 17:20–20:05 IST
-**Supersedes the conclusion in** [`261017-chrome-lora-needs-artisan-model.md`](261017-chrome-lora-needs-artisan-model.md)
-§1–2, which said the adapter route was blocked. It was blocked by not knowing the engine ships
-publicly.
+**Supersedes an earlier note** whose §1–2 said the adapter route was blocked. It was blocked by not
+knowing the engine ships publicly. That note is not reproduced here.
 
 **Refined later the same evening** — §6 records the experiment, which moved the blocker, and then
 **§9 reverses §6's conclusion**: an artisan-format model *is* public. Read §9 before acting on
@@ -27,7 +26,7 @@ publicly.
    `tf_lite_artisan_text_decoder` section — the engine selects `GPU_ARTISAN`, **honours**
    `supported_lora_ranks: [16]`, answers `Text(text='Paris')`, and two conversations on one loaded
    engine each reach `LlmGpuArtisanExecutor::LoadLoRA()`. The only unproven link is the adapter's
-   bytes: we can make the loader fail and know it wants a ≥1 MiB, 16384-aligned memory-mapped
+   bytes: we can make the loader fail and know it wants a ≥1 MiB memory-mapped
    flatbuffer, but not its schema. §6 got this backwards for an hour because the search was four
    spot checks; §9 reverses it.
 
@@ -182,8 +181,9 @@ Three builds from that one section, same runtime, `lora_rank = 8`:
 drive it: relabelling one section produced `LlmGpuArtisanExecutor::Create()`, which is the
 exact code path that carries `LoadLoRA` and `UseLoRA`. Nothing in Chromium or in the manifest
 blocks us. The hypothesis in §5 that the relabel "may be rejected if the executor validates
-the graph" is **confirmed, and the rejection is more specific than expected**: the Artisan
-loader does not want a TFLite at all.
+the graph" is **refuted**: the executor accepted the relabelled model and created. We did not
+determine what the Artisan loader does or does not want to parse inside the model — the
+relabelling experiment speaks only to the section label.
 
 **What the loader wants.** The stock run writes two sidecar caches next to the model —
 `<model>_*_mldrift_program_cache.bin` (3.2 MB) and `*_mldrift_weight_cache.bin` (270 MB).
@@ -356,8 +356,11 @@ one executor, one copy of the weights, N adapters, selected per session.
   multiple of the OS alignment requirement (16384)`
 - a 16 KB probe: `Length (1048576) and offset (0) are too large for file size (16384)`
 
-So the adapter is a **memory-mapped flatbuffer, at least 1 MiB, 16384-byte aligned**. Combined with
-§4's tensor-name regex that is most of a spec, but not the schema. The two public repos that ship a
+So the adapter is loaded as a **memory-mapped flatbuffer of at least 1 MiB**. The 16384 figure
+appears in the same error, and both probes that produced it were themselves smaller than the 1 MiB
+mapping the loader asked for — so alignment is a plausible reading of the message, not something
+these probes established. Combined with §4's tensor-name regex that is most of a spec, but not the
+schema. The two public repos that ship a
 LoRA-bearing model (`pmarruda/functiongemma-270m-it-mobile-actions-litert-lm-lora`,
 `litert-community/functiongemma-270m-it-mobile-actions`) are both gated — HTTP 401 — and I did not
 authenticate.
@@ -432,15 +435,17 @@ alone. Building a valid tflite that the loader accepts is a larger job than an u
 should absorb, so I stopped and wrote this down instead.
 
 Other constraints found alongside: `dimensions.size() == transpose_axes.size()` and
-`HasValidTransposeAxes` (tensors carry transpose axes); `Divisor must be a power of 2` (the
-weights are quantised); and LoRAs are keyed — `LoRA ID already exists`, `LoRA ID not found`,
+`HasValidTransposeAxes` (tensors carry transpose axes); `Divisor must be a power of 2` (present in
+the binary, though we did not tie it to the adapter loader specifically); and LoRAs are keyed —
+`LoRA ID already exists`, `LoRA ID not found`,
 `No LoRA ID is set`.
 
-**What Ask 1 now needs to be.** Not "what is the format" in the abstract — the schema, the rank
-rule, the name grammar and the container's composition are all known above. What is missing is
-the one thing a schema cannot tell you: **what the embedded tflite model is supposed to contain**,
-and how a caller is expected to produce it. That is a much sharper question to put to the team,
-and it is the right thing to ask.
+**What Ask 1 now needs to be.** Not "what is the format" in the abstract — the rank rule, the name
+grammar and the metadata protobuf are recovered above. What we could not establish is how the
+container is composed: a hand-built protobuf was rejected by flatbuffer validation, which tells us
+the bytes we produced were wrong without telling us the required layout. So the question is what
+the embedded tflite model is supposed to contain and how a caller is expected to produce it. That
+is sharper than "what is the schema", and it is the right thing to ask.
 
 ## 11. After the fix, stock Chrome still does not engage the broker — diagnosis incomplete
 
@@ -497,7 +502,7 @@ exactly what the fork is for, and it reverses the position taken earlier that th
 ## Provenance
 
 ```bash
-python3 -m venv /tmp/litertlm-probe && /tmp/litertlm-probe/venv/bin/pip install litert-lm
+python3 -m venv /tmp/litertlm-probe && /tmp/litertlm-probe/bin/pip install litert-lm
 ```
 → `litert-lm 0.18.0`, `litert-lm-api`, `litert-lm-builder`, plus
 `litert_lm/liblitert-lm.dylib`. Inspected read-only; the venv is disposable.

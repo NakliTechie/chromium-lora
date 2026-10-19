@@ -42,14 +42,26 @@ def main() -> int:
 
     print(f"engine created: {type(engine).__name__}")
     try:
-        session = engine.create_session()
-        for name in dir(session):
-            if not name.startswith("_") and callable(getattr(session, name)):
-                print(f"  session method: {name}")
-        answer = session.complete("What is the capital of France?")
-        print(f"OUTPUT: {str(answer)[:200]}")
+        # LiteRT-LM 0.18.0 exposes run_prefill()/run_decode() on Session, not a
+        # one-shot complete(). The conversation API is the supported path for a
+        # single question and returns a message whose contents carry the text.
+        conversation = engine.create_conversation()
+        message = conversation.send_message("What is the capital of France?")
+        answer = "".join(
+            text
+            for item in (getattr(message, "contents", None) or ())
+            if (text := getattr(item, "text", None))
+        )
+        conversation.close()
+        if not answer.strip():
+            print("GENERATION PRODUCED NO TEXT")
+            print("--- end ---")
+            return 1
+        print(f"OUTPUT: {answer[:200]}")
     except Exception as exc:  # noqa: BLE001
         print(f"SESSION FAILED: {type(exc).__name__}: {exc}")
+        print("--- end ---")
+        return 1
     print("--- end ---")
     return 0
 

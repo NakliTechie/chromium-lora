@@ -20,9 +20,10 @@ product needs, and it exists today in a public package.
 
 Two things stop it being useful:
 
-1. **Nobody outside Google can produce a valid adapter file.** The format is mostly recoverable from
-   the published binary, but the container also has to embed a valid TFLite model, and that half is
-   undocumented. See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 1.
+1. **We could not produce a valid adapter file.** The format is mostly recoverable from the
+   published binary, but the container also has to embed a valid TFLite model, and we could not
+   work out what that half contains or how a third party emits it. Two attempts to derive one both
+   failed, and we found no public example. See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 1.
 2. **Chromium has nowhere to put the caller's identity.** `ModelSubscriptionOptions` carries only
    `use_case`, so every caller on a device asking for the same use case gets the same solution.
    See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 2.
@@ -80,20 +81,28 @@ mkdir -p models && curl -L -o models/gemma-4-E2B-it-gpu.litertlm \
 Prints the selected backend and whether the rank was honoured. That single command is the whole
 existence proof for the artisan path.
 
-For two adapters against one engine:
+For two adapters against one engine, using the probe files `demo.sh` builds:
 
 ```bash
 .venv/bin/python tools/per_site_demo.py models/gemma-4-E2B-it-gpu.litertlm a.bin b.bin --rank 16
 ```
 
-Look for one `LoadLoRA()` trace per `lora_path` in stderr. The adapters are probe files, not real
-weights — the point is that dispatch reaches the loader independently each time.
+`a.bin` and `b.bin` are not in this repository — they are deliberately invalid probe files whose
+only job is to make the loader fail so you can see that dispatch reaches it independently. Create
+any two files and pass them:
+
+```bash
+: > a.bin; : > b.bin
+```
+
+Look for one `LoadLoRA()` trace per `lora_path` in stderr.
 
 ## The per-origin demo
 
-`tools/site_server.py` holds the engine and dispatches by the HTTP `Host` header, because the
-browser's own manifest broker does not engage in Chrome-branded builds (see [`docs/findings.md`](docs/findings.md)
-§11).
+`tools/site_server.py` holds the engine and dispatches by the HTTP `Host` header. We did this
+because the manifest broker produced no output at all in our Chrome 155 and Chromium fork runs, and
+we did not establish why — the diagnosis is open, so treat that as an observation rather than a
+conclusion about branded builds. See [`docs/findings.md`](docs/findings.md) §11.
 
 **Be clear about what this demonstrates.** The adapter payload is a JSON instruction applied as a
 system turn, **not** a real LoRA container. It exists to show the dispatch shape: one shared base,
@@ -101,13 +110,16 @@ per-origin selection, an opaque per-session handle, and version pinning. It is n
 LoRA works.
 
 ```bash
+# terminal 1 — the server stays in the foreground
 .venv/bin/python tools/site_server.py \
   models/gemma-4-E2B-it-gpu.litertlm examples/adapters/map.json 9401 2026.8.7.929
 
+# terminal 2 — Chromium also stays running; drive it from a third shell
 chromium --headless=new --remote-debugging-port=9352 \
   --host-resolver-rules="MAP site-a.example 127.0.0.1, MAP site-b.example 127.0.0.1, MAP site-c.example 127.0.0.1" \
   http://site-a.example:9401/
 
+# terminal 3
 node tools/drive_sites.mjs 9352 9401 out/frames
 ```
 
@@ -140,7 +152,12 @@ repeat the same survey.
 ## Status
 
 This is a question to the Chromium team, not a finished product. The honest summary is that the
-runtime half works and is public, and the format half does not exist publicly yet.
+runtime half works and is public, and that we could not find or build the format half.
+
+Both claims are bounded by what we actually did: we searched public code for the format, read the
+published binary's strings, and tried twice to construct a container ourselves. We also did not
+inspect the two repositories that ship a LoRA-bearing model, because they are gated. So "we did not
+find it" is the supported claim; "it does not exist publicly" is stronger than this work shows.
 
 If the adapter format is documented somewhere this did not find, Ask 1 goes away. If per-caller
 selection already exists somewhere this did not look, Ask 2 goes away too. Being pointed at the
