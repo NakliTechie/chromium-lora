@@ -1,0 +1,14 @@
+# chromium-lora fork. With `enable_ml_internal = true`, Chromium's on-device
+# model service calls the real ChromeML library instead of its fake backend,
+# and services/on_device_model/ml/BUILD.gn depends on this target. Google's
+# internal checkout provides it; the fork points it at the open llama.cpp
+# backend.
+
+group("optimization_guide_internal") {
+  public_deps = [ "//third_party/chromeml_llama:optimization_guide_internal" ]
+}
+
+# The root //:gn_all target lists Google's internal benchmark tool when
+# enable_ml_internal is set. The fork has no such tool.
+group("ondevice_model_benchmark") {
+}

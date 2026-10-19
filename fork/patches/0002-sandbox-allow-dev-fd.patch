@@ -1,0 +1,15 @@
+diff --git a/sandbox/policy/mac/on_device_model_execution.sb b/sandbox/policy/mac/on_device_model_execution.sb
+index 5fc04addbf..9063c24d63 100644
+--- a/sandbox/policy/mac/on_device_model_execution.sb
++++ b/sandbox/policy/mac/on_device_model_execution.sb
+@@ -56,5 +56,10 @@
+   (subpath "/System/Library/Extensions")  ; https://crbug.com/515280
+ )
+ 
++;; chromium-lora fork: the open llama.cpp backend loads the model and adapter
++;; files by reopening descriptors the browser already passed in, through
++;; /dev/fd. This grants no new files: only descriptors the process holds.
++(allow file-read* (subpath "/dev/fd"))
++
+ (if (not (maybe-disable-metal-shader-cache))
+   (maybe-allow-metal-shader-cache-access))

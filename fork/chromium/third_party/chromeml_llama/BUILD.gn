@@ -1,0 +1,42 @@
+# Open ChromeML backend over llama.cpp, for the chromium-lora research fork.
+#
+# Builds liboptimization_guide_internal.dylib with Chromium's toolchain, so the
+# std::function and std::string values in chrome_ml_api.h match the caller's
+# C++ library. llama.cpp is prebuilt (fork/backend/build-llama.sh) and reached
+# only through its C API. fork/apply.sh copies this directory into the tree.
+
+import("//build/config/features.gni")
+
+_llama_libs = [
+  "prebuilt/lib/libllama.0.dylib",
+  "prebuilt/lib/libggml.0.dylib",
+  "prebuilt/lib/libggml-base.0.dylib",
+  "prebuilt/lib/libggml-cpu.0.dylib",
+  "prebuilt/lib/libggml-metal.0.dylib",
+]
+
+shared_library("optimization_guide_internal") {
+  sources = [ "chromeml_llama.cc" ]
+  include_dirs = [ "prebuilt/include" ]
+  lib_dirs = [ "prebuilt/lib" ]
+  libs = [ "llama" ]
+  ldflags = [ "-Wl,-rpath,@loader_path" ]
+  deps = [
+    "//services/on_device_model/ml:api",
+    "//third_party/dawn/include/dawn:headers",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [
+    "//build/config/compiler:no_chromium_code",
+    "//skia:skia_config",
+  ]
+}
+
+# Places the backend and the llama.cpp libraries in
+# Chromium Framework.framework/Libraries, where chrome_ml_holder.cc looks.
+bundle_data("bundle") {
+  sources =
+      [ "$root_out_dir/liboptimization_guide_internal.dylib" ] + _llama_libs
+  outputs = [ "{{bundle_contents_dir}}/Libraries/{{source_file_part}}" ]
+  public_deps = [ ":optimization_guide_internal" ]
+}

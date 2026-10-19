@@ -95,7 +95,13 @@ const source = `(async () => {
   if (!("LanguageModel" in self)) {
     return { ok: false, error: "LanguageModel not exposed in this context", diag };
   }
-  const availability = await LanguageModel.availability();
+  // The model broker reports "unavailable" until it has loaded its manifest, so
+  // a call made right after startup can see that briefly. Retry for 30 s.
+  let availability = await LanguageModel.availability();
+  for (let i = 0; i < 30 && availability === "unavailable"; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    availability = await LanguageModel.availability();
+  }
   if (availability === "unavailable") {
     return { ok: false, error: "LanguageModel.availability() === unavailable" };
   }
@@ -139,6 +145,17 @@ const main = async () => {
     );
   });
   try {
+    // A new target starts on about:blank and commits the requested URL later;
+    // evaluating before that runs in an opaque origin with no LanguageModel.
+    // /json/new does not decode its URL, so navigate explicitly as well.
+    const wanted = new URL(url).origin;
+    if ((await evaluate(ws, "location.origin")) !== wanted) {
+      await evaluate(ws, `location.href = ${JSON.stringify(url)}`);
+    }
+    while (Date.now() < deadline &&
+           (await evaluate(ws, "location.origin")) !== wanted) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
     const out = await evaluate(ws, source);
     console.log(JSON.stringify({ browser: devtools.Browser, ...out }, null, 2));
     process.exitCode = out?.ok ? 0 : 1;

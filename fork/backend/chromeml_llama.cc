@@ -16,8 +16,6 @@
 // with the same C++ standard library as its caller. Only llama.cpp's plain C
 // API crosses into llama.cpp, which can therefore be built separately.
 
-#include <fcntl.h>
-#include <sys/param.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -82,13 +80,21 @@ const TurnMarkup& DetectMarkup(const llama_model* model) {
   return kChatMl;
 }
 
-// Returns the path behind an open file descriptor. llama.cpp loads by path.
+// Returns a path that opens the same file as an open descriptor. llama.cpp
+// loads by path, and the sandboxed service process may not be allowed to open
+// the file's real path, so this uses /dev/fd, which reopens the descriptor.
 std::string PathForFile(PlatformFile file) {
-  char path[MAXPATHLEN] = {};
-  if (file == kInvalidPlatformFile || fcntl(file, F_GETPATH, path) == -1) {
+  if (file == kInvalidPlatformFile) {
     return {};
   }
-  return path;
+  return "/dev/fd/" + std::to_string(file);
+}
+
+// Closes a descriptor the library owns but does not use.
+void CloseIfValid(PlatformFile file) {
+  if (file != kInvalidPlatformFile) {
+    close(file);
+  }
 }
 
 std::string PathForModelData(const ChromeMLModelData& data) {
@@ -109,7 +115,9 @@ struct Model {
   // llama.cpp contexts on one model may decode concurrently in principle; this
   // backend serialises them, which is enough for a research build.
   std::mutex decode_mutex;
-  // Loaded adapters, keyed by file path. Freed with the model.
+  // Loaded adapters, keyed by Chromium's file_id when given (each session gets
+  // its own descriptor for the same adapter), else by path. Freed with the
+  // model.
   std::map<std::string, llama_adapter_lora*> adapters;
 };
 
@@ -239,9 +247,12 @@ bool GetEstimatedPerformance(ChromeMLPerformanceInfo* info) {
   return true;
 }
 
-// llama.cpp uses Metal directly, not Dawn, so there is no adapter to report.
+// llama.cpp uses Metal directly, not Dawn, so there is no Dawn adapter to
+// report. Returning true without calling back tells Chromium's GPU blocklist
+// check (services/on_device_model/ml/gpu_blocklist.cc) that the GPU is usable;
+// returning false would mark it blocked.
 bool QueryGPUAdapter(void (*)(WGPUAdapter, void*), void*) {
-  return false;
+  return true;
 }
 
 bool GetCapabilities(PlatformFile, ChromeMLCapabilities& capabilities) {
@@ -280,10 +291,13 @@ ChromeMLModel SessionCreateModel(const ChromeMLModelDescriptor* descriptor,
   llama_model_params params = llama_model_default_params();
   params.n_gpu_layers = model->gpu ? -1 : 0;
   model->model = llama_model_load_from_file(path.c_str(), params);
-  // The library owns the weights file and closes it once loading is done.
-  if (data.weights_file != kInvalidPlatformFile) {
-    close(data.weights_file);
-  }
+  // The library owns these files. Only the weights are used, and they are
+  // closed once loading is done.
+  CloseIfValid(data.weights_file);
+  CloseIfValid(data.cache_file);
+  CloseIfValid(data.encoder_cache_file);
+  CloseIfValid(data.adapter_cache_file);
+  CloseIfValid(data.program_cache_file);
   if (!model->model) {
     Log("failed to load model from %s", path.c_str());
     return 0;
@@ -333,26 +347,31 @@ ChromeMLSession CreateSession(ChromeMLModel model_handle,
     if (descriptor->model_data) {
       const ChromeMLModelData& data = *descriptor->model_data;
       std::string path = PathForModelData(data);
-      if (data.weights_file != kInvalidPlatformFile) {
-        close(data.weights_file);
-      }
       if (path.empty()) {
         Log("adaptation has no readable file");
         return 0;
       }
-      std::lock_guard<std::mutex> lock(model->decode_mutex);
-      auto it = model->adapters.find(path);
-      if (it == model->adapters.end()) {
-        llama_adapter_lora* adapter =
-            llama_adapter_lora_init(model->model, path.c_str());
-        if (!adapter) {
-          Log("failed to load adapter %s", path.c_str());
-          return 0;
+      std::string key = data.file_id ? "id:" + std::to_string(*data.file_id)
+                                     : path;
+      {
+        std::lock_guard<std::mutex> lock(model->decode_mutex);
+        auto it = model->adapters.find(key);
+        if (it == model->adapters.end()) {
+          llama_adapter_lora* adapter =
+              llama_adapter_lora_init(model->model, path.c_str());
+          if (adapter) {
+            it = model->adapters.emplace(key, adapter).first;
+            Log("adapter loaded: %s", key.c_str());
+          }
         }
-        it = model->adapters.emplace(path, adapter).first;
-        Log("adapter loaded: %s", path.c_str());
+        session->adapter = it != model->adapters.end() ? it->second : nullptr;
       }
-      session->adapter = it->second;
+      // Close only after loading: the path may be /dev/fd for this descriptor.
+      CloseIfValid(data.weights_file);
+      if (!session->adapter) {
+        Log("failed to load adapter %s", key.c_str());
+        return 0;
+      }
     }
   }
   session->ctx = NewContext(model, session->max_tokens);

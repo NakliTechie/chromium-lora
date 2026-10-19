@@ -1,0 +1,8 @@
+# SolutionConfig for the Prompt API use case. No safety model: the broker skips
+# text-safety checks when none are configured.
+feature {
+  feature: MODEL_EXECUTION_FEATURE_PROMPT_API
+  input_config { max_context_tokens: 4096 }
+  output_config { max_output_tokens: 512 }
+  sampling_params { top_k: 1 temperature: 0 }
+}

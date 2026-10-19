@@ -191,7 +191,12 @@ docs/findings.md      the full record, including the claims that were retracted
 docs/ask-chromium.md  the two asks, written for the Chromium team
 tools/                the reproduction and the demo
 examples/adapters/    the demo adapter format (not a LoRA container)
+fork/                 a Chromium research fork: an open llama.cpp backend for the Prompt API
 ```
+
+`fork/` is separate from the reproduction above. It runs Chromium's own Prompt API on a local GGUF
+model through an open replacement for Google's closed on-device library, and attaches a real GGUF
+LoRA adapter per session. See [`fork/README.md`](fork/README.md) for what passes and what does not.
 
 `docs/findings.md` deliberately keeps its wrong turns. §6 concluded no public artisan model
 existed, on a four-repo sample; §9 reversed it after the `-gpu` suffix revealed the real one. That

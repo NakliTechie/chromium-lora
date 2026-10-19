@@ -18,9 +18,51 @@ This is a research fork against Chromium **155.0.8059.84**, not a product.
 |---|---|
 | Chromium 155.0.8059.84 builds from the fork's tree (M0) | Passes: `autoninja -C out/Default chrome` exit 0 on 2026-10-19 |
 | Backend library, tested outside Chromium (M1) | Passes, see below |
-| Chromium loads the library and answers the Prompt API (M2) | Not started |
+| Chromium loads the library and answers the Prompt API (M2) | Passes, see below |
 | Adapter chosen per origin, model version visible to the page (M3) | Not started |
 | Adapters rebuilt from a published recipe when the model changes (M4) | Not started |
+
+## Build the fork
+
+```bash
+fork/backend/build-llama.sh <llama.cpp checkout at tag b9830>          # relocatable llama.cpp dylibs
+fork/apply.sh <chromium/src at 155.0.8059.84> <llama.cpp checkout> <chromium/src>/out/Default
+autoninja -C out/Default chrome                                        # from chromium/src
+```
+
+`apply.sh` makes four changes to the tree, and nothing else:
+
+1. `third_party/chromeml_llama/` builds the library with Chromium's toolchain, so the
+   `std::function` and `std::string` values in the interface match the caller's C++ library.
+2. `components/optimization_guide/internal/BUILD.gn` points Chromium's internal-library target at
+   it. With `enable_ml_internal = true` (added to `args.gn`), the on-device model service calls a
+   real library instead of its built-in fake backend.
+3. `patches/0001` bundles the library and llama.cpp into `Chromium Framework.framework/Libraries`.
+4. `patches/0002` lets the model service's sandbox reopen file descriptors it already holds
+   through `/dev/fd`. llama.cpp loads by path, and the browser hands the model over as an open file.
+
+## The M2 check
+
+`m2/run_m2.sh` writes a model broker manifest (`m2/manifest.textproto`) whose `prompt_api` use
+case points at a local GGUF file, serves it through Chromium's existing
+`--optimization-guide-manifest-override` switch, and calls the Prompt API from a page on
+`http://127.0.0.1` over the DevTools protocol.
+
+Result on 2026-10-20, SmolLM2-360M-Instruct, no adapter:
+
+```json
+{ "ok": true, "availability": "available", "answer": "Paris", "ms": 496 }
+```
+
+The backend logged `model loaded: /dev/fd/12, markup chatml, max_tokens 8192, gpu`.
+
+```bash
+fork/m2/run_m2.sh <chromium/src> <chromium/src>/out/Default <writable model dir> <model.gguf> /tmp/m2-work
+```
+
+Two things a headless run of an unsigned Chromium build needs: `--use-mock-keychain`, because
+otherwise loading the profile waits on a macOS Keychain prompt for the cookie-encryption key, and a
+page served from a trustworthy origin such as `http://127.0.0.1`.
 
 ## The M1 check
 
@@ -66,4 +108,8 @@ backend/chromeml_llama.cc   the library: ChromeMLAPI over llama.cpp's C API
 backend/chromium/           ChromeML headers copied from Chromium 155.0.8059.84 (BSD, see LICENSE there)
 backend/standalone/         minimal Dawn and Skia stand-ins, for building outside Chromium
 backend/test/               the M1 test program and its scorer
+backend/build-llama.sh      builds the pinned llama.cpp as relocatable dylibs
+chromium/                   files apply.sh copies into the Chromium tree
+patches/                    the two edits apply.sh makes to existing Chromium files
+m2/                         the M2 manifest, solution config and run script
 ```

@@ -1,0 +1,61 @@
+# Model broker manifest for the chromium-lora fork (M2: base model only).
+# Encoded to manifest.binarypb by fork/m2/run_m2.sh. Every file uses the
+# built-in "manifest" asset, which is the directory holding this manifest, so
+# no component download is involved.
+recipes {
+  base_models {
+    key: "local_base"
+    value {
+      weights_file { asset_id: "manifest" relative_path: "model.gguf" }
+      backend_type: BACKEND_TYPE_GPU
+      performance_hint: PERFORMANCE_HINT_HIGHEST_QUALITY
+      max_tokens: 8192
+    }
+  }
+  solutions {
+    key: "prompt_solution"
+    value {
+      model_recipe_id: "local_base"
+      config_file { asset_id: "manifest" relative_path: "prompt_config.binarypb" }
+    }
+  }
+}
+category_configs {
+  key: "gpu_high_tier"
+  value {
+    use_cases { key: "prompt_api" value { solution_recipe_id: "prompt_solution" } }
+    feature_configs {
+      key: "prompt_api"
+      value {
+        type_url: "type.googleapis.com/optimization_guide.proto.PromptApiFeatureConfig"
+        value: "\n\nprompt_api"
+      }
+    }
+  }
+}
+category_configs {
+  key: "gpu_low_tier"
+  value {
+    use_cases { key: "prompt_api" value { solution_recipe_id: "prompt_solution" } }
+    feature_configs {
+      key: "prompt_api"
+      value {
+        type_url: "type.googleapis.com/optimization_guide.proto.PromptApiFeatureConfig"
+        value: "\n\nprompt_api"
+      }
+    }
+  }
+}
+category_configs {
+  key: "cpu"
+  value {
+    use_cases { key: "prompt_api" value { solution_recipe_id: "prompt_solution" } }
+    feature_configs {
+      key: "prompt_api"
+      value {
+        type_url: "type.googleapis.com/optimization_guide.proto.PromptApiFeatureConfig"
+        value: "\n\nprompt_api"
+      }
+    }
+  }
+}

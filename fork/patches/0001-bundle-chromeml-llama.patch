@@ -1,0 +1,14 @@
+diff --git a/chrome/BUILD.gn b/chrome/BUILD.gn
+index 8a60d7061b..22a10cf163 100644
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -1231,7 +1231,9 @@ if (is_win) {
+       public_deps = [ "//components/optimization_guide/core:optimization_guide_internal_library_copy" ]
+     }
+   } else {
++    # chromium-lora fork: ship the open llama.cpp ChromeML backend instead.
+     group("optimization_guide_library") {
++      public_deps = [ "//third_party/chromeml_llama:bundle" ]
+     }
+   }
+ 
