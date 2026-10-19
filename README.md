@@ -165,13 +165,24 @@ gets that origin's adapter. A page may still fire a request at another origin, b
 blocks it from reading the response — the demo server sends no `Access-Control-Allow-Origin`, so
 there is no cross-origin read path to another site's adapter.
 
-Version pinning is real and enforced server-side — an adapter whose `target_version` differs from
-the loaded model is refused rather than silently used:
+Version pinning is real and enforced server-side. An adapter whose `target_version` differs from
+the loaded model is refused with HTTP 409 rather than silently used. Every example adapter targets
+`2026.8.7.929`, so start the server with any other version string to see the refusal:
+
+```bash
+.venv/bin/python tools/site_server.py \
+  models/gemma-4-E2B-it-gpu.litertlm examples/adapters/map.json 9401 2026.9.0.0
+curl -s -w '\nHTTP %{http_code}\n' -H 'Host: site-b.example' \
+  'http://127.0.0.1:9401/api/ask?prompt=hello'
+```
 
 ```
-$ curl -s -H 'Host: site-b.example' 'http://127.0.0.1:9401/api/ask?prompt=What%20do%20you%20do%3F'
-{"origin":"site-b.example","handle":"0d784a0187a8","adapter":"site-b-adapter","answer":"…"}
+{"origin": "site-b.example", "handle": "ffeb193aee19", "answer": null, "refused": "adapter 'site-b-adapter' targets model version 2026.8.7.929, loaded model is 2026.9.0.0", "model_version": "2026.9.0.0"}
+HTTP 409
 ```
+
+An origin with no registered adapter gets the same 409, with `"refused": "no adapter registered for
+<origin>"`.
 
 ## Layout
 

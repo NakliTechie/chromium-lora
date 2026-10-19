@@ -12,12 +12,13 @@ knowing the engine ships publicly. That note is not reproduced here.
 **[dylib]** `strings` on Chrome's `liboptimization_guide_internal.dylib` @ 155.0.8059.84 ·
 **[run]** I ran it on this Mac today · **[inferred]** reasoned from the two.
 
-## What this means for Chirag
+## Summary
 
-1. **The demo needs no Chromium patch and no closed binary.** `litert-lm` on PyPI ships the same
-   inference stack Chrome's closed dylib is built from — same class names, same
-   `supported_lora_ranks` check, same backend enum. We assemble our own `.litertlm` and point Chrome
-   at it with the manifest override the 17 Oct run already proved works [wheel], [dylib].
+1. **The engine-side demo needs no Chromium patch and no closed binary.** `litert-lm` on PyPI ships
+   the same inference stack Chrome's closed dylib is built from: same class names, same
+   `supported_lora_ranks` check, same backend enum [wheel], [dylib]. Getting Chrome itself to load
+   our own `.litertlm` through the manifest override does **not** work yet. §8 retracts the run that
+   seemed to prove the override, and §11 shows Chrome stops before it resolves any model [run].
 2. **Per-site switching is already a supported shape upstream, not a feature we would ask for.**
    LoRA is attached per *session* (`lora_path`), and adapters are keyed by `lora_id`. Two sites =
    two sessions on one shared engine [wheel], [dylib].
@@ -141,8 +142,8 @@ Recipe:
 2. `litert-lm-builder unpack` it.
 3. Repack with the text decoder section relabelled `artisan_text_decoder`,
    `backend_constraint=gpu_artisan`.
-4. Serve it through `--optimization-guide-manifest-override` with an `AdaptationRecipe` — the path
-   already proven to route an adapter [17 Oct note].
+4. Serve it through `--optimization-guide-manifest-override` with an `AdaptationRecipe`. The 17 Oct
+   note took this path as proven to route an adapter; §8 retracts that, and §11 records the result.
 5. Watch for `Artisan model detected. Switching backend from GPU to GPU_ARTISAN.` and
    `LlmGpuArtisanExecutor::LoadLoRA id:` in the engine log. Those two lines are the whole claim.
 6. Two adapters, two origins, one engine, two sessions — the per-site part.
