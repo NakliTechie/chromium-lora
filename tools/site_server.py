@@ -153,6 +153,7 @@ async function ask(){{
   var r=await fetch('/api/ask?prompt='+encodeURIComponent('What do you do?'));
   var j=await r.json();
   o.textContent = j.refused ? 'REFUSED\\n\\n'+j.refused
+    : j.error ? 'ERROR\\n\\n'+j.error
     : 'handle: '+j.handle+'\\nadapter: '+j.adapter+'\\n\\n'+j.answer;
 }}
 </script>""".encode(), "text/html")

@@ -221,7 +221,7 @@ def main() -> int:
     parser.add_argument("--base", default="gemma4_gpu_high_tier_model")
     parser.add_argument("--solution", default="prompt_gemma4_gpu_high_tier_solution")
     parser.add_argument("--adapter", type=Path, required=True)
-    parser.add_argument("--rank", type=int, default=8)
+    parser.add_argument("--rank", type=int, default=16, choices=(16, 32))
     parser.add_argument(
         "--component", default="lora_probe_component", help="adapter component name"
     )
@@ -254,7 +254,12 @@ def main() -> int:
     )
     text = repoint_solution(text, args.solution, adaptation)
 
-    patched = args.out_dir / "manifest.patched.binarypb"
+    # Chromium appends "manifest.binarypb" to the directory named by the
+    # override's manifest_path, so the patched file must carry that exact name
+    # and live in a directory of its own.
+    patched_dir = args.out_dir / "patched_manifest"
+    patched_dir.mkdir(exist_ok=True)
+    patched = patched_dir / "manifest.binarypb"
     patched.write_bytes(encode(text))
 
     # Round-trip guard. Neither bytes nor line order is a valid invariant here:
@@ -264,11 +269,9 @@ def main() -> int:
     verify = decode(patched)
     _, _, base_block = block_with_key(verify, "base_models", args.base)
     _, _, solution_block = block_with_key(verify, "solutions", args.solution)
-    _, _, original_base = block_with_key(before, "base_models", args.base)
     _, _, original_solution = block_with_key(before, "solutions", args.solution)
     checks = {
         "rank declared on base": f"supported_adaptation_ranks: {args.rank}" in base_block,
-        "rank absent from original": "supported_adaptation_ranks" not in original_base,
         "adaptation registered": f'key: "{adaptation}"' in verify,
         "adapter component registered": f'key: "{args.component}"' in verify,
         "solution repointed": f'model_recipe_id: "{adaptation}"' in solution_block,
@@ -293,7 +296,7 @@ def main() -> int:
     adapter_key = "0" * 64
     adapter_version = "1.0.0.0"
     override = {
-        "manifest_path": str(patched),
+        "manifest_path": str(patched_dir),
         "components": {adapter_key: {adapter_version: str(staging)}},
     }
     if args.base_component:

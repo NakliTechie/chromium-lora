@@ -39,7 +39,9 @@ function cdp(ws) {
       const { resolve, reject } = pending.get(msg.id);
       pending.delete(msg.id);
       if (msg.error) reject(new Error(JSON.stringify(msg.error)));
-      else resolve(msg.result);
+      else if (msg.result?.exceptionDetails) {
+        reject(new Error(JSON.stringify(msg.result.exceptionDetails)));
+      } else resolve(msg.result);
     }
   });
   return (method, params = {}) =>
