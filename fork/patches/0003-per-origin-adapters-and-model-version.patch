@@ -1,0 +1,324 @@
+diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
+index 71d6f2f067..7e048df923 100644
+--- a/chrome/browser/ai/ai_manager.cc
++++ b/chrome/browser/ai/ai_manager.cc
+@@ -377,6 +377,46 @@ std::optional<std::string> GetUseCaseFromFeatureConfig(
+   return feature_config->default_use_case();
+ }
+ 
++// chromium-lora fork: picks the Prompt API use case for `origin` from the
++// feature config's origin_use_cases, falling back to the default use case.
++std::optional<std::string> ResolvePromptApiUseCase(
++    const url::Origin& origin,
++    const std::optional<mojo_base::ProtoWrapper>& wrapper) {
++  auto feature_config =
++      ParseFeatureConfig<optimization_guide::proto::PromptApiFeatureConfig>(
++          wrapper);
++  if (feature_config && !origin.opaque()) {
++    auto it = feature_config->origin_use_cases().find(origin.Serialize());
++    if (it != feature_config->origin_use_cases().end()) {
++      return it->second;
++    }
++  }
++  return GetUseCaseFromFeatureConfig<
++      optimization_guide::proto::PromptApiFeatureConfig>(wrapper);
++}
++
++// Same as RequestAssetsAndWaitForClientWithConfig below, with the use case
++// chosen by `resolver`.
++void RequestAssetsAndWaitForClientWithResolver(
++    optimization_guide::ModelBrokerClient* broker_client,
++    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor,
++    base::OnceCallback<void(base::WeakPtr<optimization_guide::ModelClient>)>
++        callback,
++    AIManager::UseCaseResolver resolver,
++    std::optional<mojo_base::ProtoWrapper> wrapper) {
++  std::optional<std::string> use_case = std::move(resolver).Run(wrapper);
++  if (!use_case.has_value() || use_case->empty()) {
++    std::move(callback).Run(nullptr);
++    return;
++  }
++  if (monitor) {
++    broker_client->AddModelDownloadProgressObserver(*use_case,
++                                                    std::move(monitor));
++  }
++  broker_client->RequestAssetsFor(*use_case);
++  broker_client->GetSubscriber(*use_case).WaitForClient(std::move(callback));
++}
++
+ // Creates a session for a feature by determining the correct model use case
+ // (e.g. default, performance preference, or experimental use case) via the
+ // provided `UseCaseResolver` and the feature configuration.
+@@ -738,6 +778,11 @@ AIManager::AIManager(content::BrowserContext* browser_context,
+ 
+ AIManager::~AIManager() = default;
+ 
++url::Origin AIManager::GetRequestingOrigin() const {
++  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
++  return rfh ? rfh->GetLastCommittedOrigin() : url::Origin();
++}
++
+ void AIManager::AddReceiver(
+     mojo::PendingReceiver<blink::mojom::AIManager> receiver) {
+   receivers_.Add(this, std::move(receiver));
+@@ -823,7 +868,8 @@ void AIManager::CanCreateLanguageModel(
+     CanCreateSessionWithConfig<
+         optimization_guide::proto::PromptApiFeatureConfig>(
+         optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+-        input_capabilities, std::move(callback));
++        input_capabilities, std::move(callback),
++        base::BindOnce(&ResolvePromptApiUseCase, GetRequestingOrigin()));
+   } else {
+     CanCreateSession(optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+                      input_capabilities, std::move(callback));
+@@ -873,12 +919,13 @@ void AIManager::CreateLanguageModel(
+           optimization_guide::kOptimizationGuideManifestBroker)) {
+     model_broker_client_->GetConfig(
+         optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+-        base::BindOnce(&RequestAssetsAndWaitForClientWithConfig<
+-                           optimization_guide::proto::PromptApiFeatureConfig>,
++        base::BindOnce(&RequestAssetsAndWaitForClientWithResolver,
+                        model_broker_client_.get(), std::move(monitor),
+                        base::BindOnce(&AIManager::CreateLanguageModelInternal,
+                                       weak_factory_.GetWeakPtr(),
+-                                      std::move(client), std::move(options))));
++                                      std::move(client), std::move(options)),
++                       base::BindOnce(&ResolvePromptApiUseCase,
++                                      GetRequestingOrigin())));
+   } else {
+     if (monitor) {
+       model_broker_client_->AddModelDownloadProgressObserver(
+@@ -1330,7 +1377,8 @@ blink::mojom::AILanguageModelParamsPtr AIManager::GetLanguageModelParams(
+ 
+   auto model_info = blink::mojom::AILanguageModelParams::New(
+       blink::mojom::AILanguageModelSamplingParams::New(),
+-      blink::mojom::AILanguageModelSamplingParams::New());
++      blink::mojom::AILanguageModelSamplingParams::New(),
++      /*model_version=*/std::nullopt);
+ 
+   model_info->default_sampling_params->top_k =
+       sampling_params_config->default_top_k;
+@@ -1344,6 +1392,9 @@ blink::mojom::AILanguageModelParamsPtr AIManager::GetLanguageModelParams(
+   auto metadata = model_client->GetFeatureMetadata();
+   if (metadata.has_value()) {
+     auto parsed_metadata = AILanguageModel::ParseMetadata(metadata.value());
++    if (!parsed_metadata.model_version().empty()) {
++      model_info->model_version = parsed_metadata.model_version();
++    }
+     if (parsed_metadata.has_max_sampling_params()) {
+       auto max_sampling_params = parsed_metadata.max_sampling_params();
+       if (max_sampling_params.has_top_k()) {
+@@ -1367,11 +1418,47 @@ void AIManager::GetLanguageModelParams(
+     return;
+   }
+ 
+-  auto& subscriber = model_broker_client_->GetSubscriber(
+-      optimization_guide::mojom::OnDeviceFeature::kPromptApi);
+-  optimization_guide::ModelClient* client =
+-      subscriber.client().has_value() ? &subscriber.client().value() : nullptr;
+-  std::move(callback).Run(GetLanguageModelParams(client));
++  if (!base::FeatureList::IsEnabled(
++          optimization_guide::kOptimizationGuideManifestBroker)) {
++    auto& subscriber = model_broker_client_->GetSubscriber(
++        optimization_guide::mojom::OnDeviceFeature::kPromptApi);
++    optimization_guide::ModelClient* client =
++        subscriber.client().has_value() ? &subscriber.client().value()
++                                        : nullptr;
++    std::move(callback).Run(GetLanguageModelParams(client));
++    return;
++  }
++
++  // chromium-lora fork: report the params, including the model version, of the
++  // use case this origin is served, waiting for that model if needed.
++  model_broker_client_->GetConfig(
++      optimization_guide::mojom::OnDeviceFeature::kPromptApi,
++      base::BindOnce(
++          [](base::WeakPtr<AIManager> self, url::Origin origin,
++             GetLanguageModelParamsCallback callback,
++             std::optional<mojo_base::ProtoWrapper> wrapper) {
++            std::optional<std::string> use_case =
++                ResolvePromptApiUseCase(origin, wrapper);
++            if (!self || !self->model_broker_client_ || !use_case ||
++                use_case->empty()) {
++              std::move(callback).Run(nullptr);
++              return;
++            }
++            self->model_broker_client_->RequestAssetsFor(*use_case);
++            self->model_broker_client_->GetSubscriber(*use_case).WaitForClient(
++                base::BindOnce(
++                    [](base::WeakPtr<AIManager> self,
++                       GetLanguageModelParamsCallback callback,
++                       base::WeakPtr<optimization_guide::ModelClient> client) {
++                      std::move(callback).Run(
++                          self && client
++                              ? self->GetLanguageModelParams(client.get())
++                              : nullptr);
++                    },
++                    self, std::move(callback)));
++          },
++          weak_factory_.GetWeakPtr(), GetRequestingOrigin(),
++          std::move(callback)));
+ }
+ 
+ void AIManager::CanCreateWriter(blink::mojom::AIWriterCreateOptionsPtr options,
+diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
+index b20f0c10f4..a071c9c0da 100644
+--- a/chrome/browser/ai/ai_manager.h
++++ b/chrome/browser/ai/ai_manager.h
+@@ -34,6 +34,7 @@
+ #include "third_party/blink/public/mojom/ai/ai_language_model.mojom-forward.h"
+ #include "third_party/blink/public/mojom/ai/ai_manager.mojom.h"
+ #include "third_party/blink/public/mojom/devtools/console_message.mojom-forward.h"
++#include "url/origin.h"
+ 
+ namespace base {
+ class SupportsUserData;
+@@ -72,6 +73,10 @@ class AIManager : public base::SupportsUserData::Data,
+ 
+   ~AIManager() override;
+ 
++  // chromium-lora fork: the committed origin of the frame this manager serves,
++  // or an opaque origin when there is no live frame.
++  url::Origin GetRequestingOrigin() const;
++
+   void AddReceiver(mojo::PendingReceiver<blink::mojom::AIManager> receiver);
+ 
+   size_t GetContextBoundObjectSetSizeForTesting() {
+diff --git a/components/optimization_guide/proto/feature_configs.proto b/components/optimization_guide/proto/feature_configs.proto
+index d1390842d8..7353fc1ee1 100644
+--- a/components/optimization_guide/proto/feature_configs.proto
++++ b/components/optimization_guide/proto/feature_configs.proto
+@@ -25,4 +25,9 @@ message WritingAssistanceApiFeatureConfig {
+ message PromptApiFeatureConfig {
+   string default_use_case = 1;
+   map<string, string> experimental_use_cases = 2;
++  // chromium-lora fork: use case for a serialized origin (url::Origin::
++  // Serialize()), so each listed origin gets its own solution, for example
++  // one backed by that origin's adaptation. Unlisted origins use
++  // default_use_case. The browser resolves the origin; a page cannot choose.
++  map<string, string> origin_use_cases = 100;
+ }
+diff --git a/components/optimization_guide/proto/features/prompt_api.proto b/components/optimization_guide/proto/features/prompt_api.proto
+index 8fe77cfa1d..26f2f4a872 100644
+--- a/components/optimization_guide/proto/features/prompt_api.proto
++++ b/components/optimization_guide/proto/features/prompt_api.proto
+@@ -68,6 +68,10 @@ message PromptApiResponse {
+ 
+ // Type for OnDeviceModelExecutionFeatureConfig::feature_metadata.
+ message PromptApiMetadata {
++  // chromium-lora fork: version of the base model, exposed to pages through
++  // LanguageModel.params().modelVersion. Adapters are pinned to it.
++  string model_version = 100;
++
+   // A version for config changes that require implementor updates.
+   // Version 0->2 Changes from using StringValue -> PromptApiRequest.
+   uint32 version = 1 [features = { field_presence: EXPLICIT }];
+diff --git a/content/browser/ai/echo_ai_manager_impl.cc b/content/browser/ai/echo_ai_manager_impl.cc
+index 0edb41c622..45e7caded9 100644
+--- a/content/browser/ai/echo_ai_manager_impl.cc
++++ b/content/browser/ai/echo_ai_manager_impl.cc
+@@ -255,7 +255,8 @@ void EchoAIManagerImpl::GetLanguageModelParams(
+           optimization_guide::features::GetOnDeviceModelDefaultTemperature()),
+       blink::mojom::AILanguageModelSamplingParams::New(
+           optimization_guide::features::GetOnDeviceModelMaxTopK(),
+-          /*temperature=*/2.0f)));
++          /*temperature=*/2.0f),
++      /*model_version=*/std::nullopt));
+ }
+ 
+ void EchoAIManagerImpl::CanCreateWriter(
+diff --git a/third_party/blink/public/mojom/ai/ai_language_model.mojom b/third_party/blink/public/mojom/ai/ai_language_model.mojom
+index 4fb23d9669..9d5080ec32 100644
+--- a/third_party/blink/public/mojom/ai/ai_language_model.mojom
++++ b/third_party/blink/public/mojom/ai/ai_language_model.mojom
+@@ -30,6 +30,8 @@ struct AILanguageModelSamplingParams {
+ struct AILanguageModelParams {
+   AILanguageModelSamplingParams default_sampling_params;
+   AILanguageModelSamplingParams max_sampling_params;
++  // chromium-lora fork: version of the base model, when the browser knows it.
++  string? model_version;
+ };
+ 
+ // The information of an AILanguageModel instance, this should be returned
+diff --git a/third_party/blink/renderer/modules/ai/language_model.cc b/third_party/blink/renderer/modules/ai/language_model.cc
+index 48325362be..96305e268a 100644
+--- a/third_party/blink/renderer/modules/ai/language_model.cc
++++ b/third_party/blink/renderer/modules/ai/language_model.cc
+@@ -713,7 +713,8 @@ ScriptPromise<IDLNullable<LanguageModelParams>> LanguageModel::params(
+             language_model_params->default_sampling_params->top_k,
+             language_model_params->max_sampling_params->top_k,
+             language_model_params->default_sampling_params->temperature,
+-            language_model_params->max_sampling_params->temperature);
++            language_model_params->max_sampling_params->temperature,
++            language_model_params->model_version);
+         resolver->Resolve(params);
+       },
+       WrapPersistent(resolver)));
+diff --git a/third_party/blink/renderer/modules/ai/language_model_params.cc b/third_party/blink/renderer/modules/ai/language_model_params.cc
+index f5bd658555..9512e353a3 100644
+--- a/third_party/blink/renderer/modules/ai/language_model_params.cc
++++ b/third_party/blink/renderer/modules/ai/language_model_params.cc
+@@ -9,11 +9,13 @@ namespace blink {
+ LanguageModelParams::LanguageModelParams(uint64_t default_top_k,
+                                          uint64_t max_top_k,
+                                          float default_temperature,
+-                                         float max_temperature)
++                                         float max_temperature,
++                                         String model_version)
+     : default_top_k_(default_top_k),
+       max_top_k_(max_top_k),
+       default_temperature_(default_temperature),
+-      max_temperature_(max_temperature) {}
++      max_temperature_(max_temperature),
++      model_version_(std::move(model_version)) {}
+ 
+ void LanguageModelParams::Trace(Visitor* visitor) const {
+   ScriptWrappable::Trace(visitor);
+diff --git a/third_party/blink/renderer/modules/ai/language_model_params.h b/third_party/blink/renderer/modules/ai/language_model_params.h
+index ccc23ef5f8..0996802fb5 100644
+--- a/third_party/blink/renderer/modules/ai/language_model_params.h
++++ b/third_party/blink/renderer/modules/ai/language_model_params.h
+@@ -6,6 +6,7 @@
+ #define THIRD_PARTY_BLINK_RENDERER_MODULES_AI_LANGUAGE_MODEL_PARAMS_H_
+ 
+ #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
++#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+ 
+ namespace blink {
+ 
+@@ -16,7 +17,8 @@ class LanguageModelParams final : public ScriptWrappable {
+   LanguageModelParams(uint64_t default_top_k,
+                       uint64_t max_top_k,
+                       float default_temperature,
+-                      float max_temperature);
++                      float max_temperature,
++                      String model_version = String());
+ 
+   void Trace(Visitor* visitor) const override;
+ 
+@@ -25,12 +27,14 @@ class LanguageModelParams final : public ScriptWrappable {
+   uint64_t maxTopK() const { return max_top_k_; }
+   float defaultTemperature() const { return default_temperature_; }
+   float maxTemperature() const { return max_temperature_; }
++  String modelVersion() const { return model_version_; }
+ 
+  private:
+   const uint64_t default_top_k_;
+   const uint64_t max_top_k_;
+   const float default_temperature_;
+   const float max_temperature_;
++  const String model_version_;
+ };
+ 
+ }  // namespace blink
+diff --git a/third_party/blink/renderer/modules/ai/language_model_params.idl b/third_party/blink/renderer/modules/ai/language_model_params.idl
+index 8b989d79ae..772a5e322f 100644
+--- a/third_party/blink/renderer/modules/ai/language_model_params.idl
++++ b/third_party/blink/renderer/modules/ai/language_model_params.idl
+@@ -15,4 +15,6 @@ interface LanguageModelParams {
+   readonly attribute unsigned long maxTopK;
+   readonly attribute float defaultTemperature;
+   readonly attribute float maxTemperature;
++  // chromium-lora fork: version of the base model; adapters are pinned to it.
++  readonly attribute DOMString? modelVersion;
+ };

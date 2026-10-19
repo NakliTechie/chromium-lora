@@ -16,7 +16,10 @@
 // with the same C++ standard library as its caller. Only llama.cpp's plain C
 // API crosses into llama.cpp, which can therefore be built separately.
 
+#include <fcntl.h>
 #include <unistd.h>
+
+#include <CommonCrypto/CommonDigest.h>
 
 #include <algorithm>
 #include <atomic>
@@ -90,6 +93,46 @@ std::string PathForFile(PlatformFile file) {
   return "/dev/fd/" + std::to_string(file);
 }
 
+// The model version adapters are pinned to: "sha256:" plus the first 16 hex
+// digits of the weights file's SHA-256. fork/tools/tag_adapter.py computes the
+// same value when it stamps an adapter. Reads with pread, because reopening
+// a descriptor through /dev/fd shares its offset, and llama.cpp then reads
+// the same descriptor from the start.
+constexpr char kTargetVersionKey[] = "chromium_lora.target_model_version";
+
+std::string ModelVersion(const ChromeMLModelData& data) {
+  int fd = data.weights_file;
+  bool owned = false;
+  if (fd == kInvalidPlatformFile && data.model_path) {
+    fd = open(data.model_path, O_RDONLY);
+    owned = true;
+  }
+  if (fd < 0) {
+    return {};
+  }
+  CC_SHA256_CTX ctx;
+  CC_SHA256_Init(&ctx);
+  std::vector<unsigned char> buf(1 << 22);
+  off_t offset = 0;
+  ssize_t n;
+  while ((n = pread(fd, buf.data(), buf.size(), offset)) > 0) {
+    CC_SHA256_Update(&ctx, buf.data(), static_cast<CC_LONG>(n));
+    offset += n;
+  }
+  if (owned) {
+    close(fd);
+  }
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digest, &ctx);
+  std::string version = "sha256:";
+  char hex[3];
+  for (int i = 0; i < 8; ++i) {
+    std::snprintf(hex, sizeof(hex), "%02x", digest[i]);
+    version += hex;
+  }
+  return version;
+}
+
 // Closes a descriptor the library owns but does not use.
 void CloseIfValid(PlatformFile file) {
   if (file != kInvalidPlatformFile) {
@@ -112,6 +155,8 @@ struct Model {
   float temperature = 0.0f;
   int top_k = 1;
   bool gpu = true;
+  // See ModelVersion(). Adapters whose target version differs are refused.
+  std::string version;
   // llama.cpp contexts on one model may decode concurrently in principle; this
   // backend serialises them, which is enough for a research build.
   std::mutex decode_mutex;
@@ -133,6 +178,11 @@ struct Session {
   // A clone restores the attention cache but not the logits.
   llama_token last_token = 0;
   bool has_logits = false;
+  // Set when the session's adapter was refused (for example, built for another
+  // model). Chromium 155 does not check CreateSession's result, so a refused
+  // session must still complete every call: appends add nothing and
+  // generations fail with the only error status the interface has.
+  bool refused = false;
 };
 
 struct Cancel {
@@ -290,6 +340,7 @@ ChromeMLModel SessionCreateModel(const ChromeMLModelDescriptor* descriptor,
   model->gpu = descriptor->backend_type != ml::ModelBackendType::kCpuBackend;
   llama_model_params params = llama_model_default_params();
   params.n_gpu_layers = model->gpu ? -1 : 0;
+  model->version = ModelVersion(data);
   model->model = llama_model_load_from_file(path.c_str(), params);
   // The library owns these files. Only the weights are used, and they are
   // closed once loading is done.
@@ -310,8 +361,9 @@ ChromeMLModel SessionCreateModel(const ChromeMLModelDescriptor* descriptor,
   model->max_tokens = std::min<uint32_t>(model->max_tokens, trained);
   model->temperature = descriptor->temperature;
   model->top_k = descriptor->top_k;
-  Log("model loaded: %s, markup %s, max_tokens %u, %s", path.c_str(),
-      model->markup->name, model->max_tokens, model->gpu ? "gpu" : "cpu");
+  Log("model loaded: %s, version %s, markup %s, max_tokens %u, %s",
+      path.c_str(), model->version.c_str(), model->markup->name,
+      model->max_tokens, model->gpu ? "gpu" : "cpu");
   return reinterpret_cast<ChromeMLModel>(model.release());
 }
 
@@ -359,9 +411,23 @@ ChromeMLSession CreateSession(ChromeMLModel model_handle,
         if (it == model->adapters.end()) {
           llama_adapter_lora* adapter =
               llama_adapter_lora_init(model->model, path.c_str());
+          char target[128] = {};
+          if (adapter && llama_adapter_meta_val_str(adapter, kTargetVersionKey,
+                                                    target, sizeof(target)) < 0) {
+            target[0] = '\0';
+          }
+          if (adapter && model->version != target) {
+            // Pinning: an adapter built for another model is refused, not
+            // applied to weights it was not trained against.
+            Log("adapter %s refused: built for model %s, loaded model is %s",
+                key.c_str(), *target ? target : "(untagged)",
+                model->version.c_str());
+            llama_adapter_lora_free(adapter);
+            adapter = nullptr;
+          }
           if (adapter) {
             it = model->adapters.emplace(key, adapter).first;
-            Log("adapter loaded: %s", key.c_str());
+            Log("adapter loaded: %s, target %s", key.c_str(), target);
           }
         }
         session->adapter = it != model->adapters.end() ? it->second : nullptr;
@@ -369,8 +435,9 @@ ChromeMLSession CreateSession(ChromeMLModel model_handle,
       // Close only after loading: the path may be /dev/fd for this descriptor.
       CloseIfValid(data.weights_file);
       if (!session->adapter) {
-        Log("failed to load adapter %s", key.c_str());
-        return 0;
+        Log("session refused: adapter %s not loaded", key.c_str());
+        session->refused = true;
+        return reinterpret_cast<ChromeMLSession>(session.release());
       }
     }
   }
@@ -391,6 +458,10 @@ ChromeMLSession CloneSession(ChromeMLSession handle) {
     return 0;
   }
   auto clone = std::make_unique<Session>(*source);
+  if (source->refused) {
+    clone->ctx = nullptr;
+    return reinterpret_cast<ChromeMLSession>(clone.release());
+  }
   clone->ctx = NewContext(source->model, source->max_tokens);
   if (!clone->ctx || !AttachAdapter(clone.get())) {
     if (clone->ctx) {
@@ -411,7 +482,9 @@ void DestroySession(ChromeMLSession handle) {
   if (!session) {
     return;
   }
-  llama_free(session->ctx);
+  if (session->ctx) {
+    llama_free(session->ctx);
+  }
   delete session;
 }
 
@@ -442,6 +515,12 @@ bool SessionAppend(ChromeMLSession handle, const ChromeMLAppendOptions* options,
   auto* session = reinterpret_cast<Session*>(handle);
   if (!session || !options) {
     return false;
+  }
+  if (session->refused) {
+    if (options->context_saved_fn && *options->context_saved_fn) {
+      (*options->context_saved_fn)(0);
+    }
+    return true;
   }
   std::string text =
       Render(*session->model->markup, options->input, options->input_size);
@@ -475,6 +554,12 @@ bool SessionGenerate(ChromeMLSession handle,
     g_constraint_fns->Delete(options->constraint);
   }
   const ChromeMLGenerateOutputFn& output_fn = *options->output_fn;
+  if (session->refused) {
+    ChromeMLGenerateOutput refused{ChromeMLGenerateStatus::kInvalidConstraint,
+                                   nullptr};
+    output_fn(&refused);
+    return true;
+  }
 
   llama_sampler* sampler =
       llama_sampler_chain_init(llama_sampler_chain_default_params());

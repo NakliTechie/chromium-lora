@@ -19,7 +19,7 @@ This is a research fork against Chromium **155.0.8059.84**, not a product.
 | Chromium 155.0.8059.84 builds from the fork's tree (M0) | Passes: `autoninja -C out/Default chrome` exit 0 on 2026-10-19 |
 | Backend library, tested outside Chromium (M1) | Passes, see below |
 | Chromium loads the library and answers the Prompt API (M2) | Passes, see below |
-| Adapter chosen per origin, model version visible to the page (M3) | Not started |
+| Adapter chosen per origin, model version visible to the page (M3) | Passes, see below |
 | Adapters rebuilt from a published recipe when the model changes (M4) | Not started |
 
 ## Build the fork
@@ -30,7 +30,7 @@ fork/apply.sh <chromium/src at 155.0.8059.84> <llama.cpp checkout> <chromium/src
 autoninja -C out/Default chrome                                        # from chromium/src
 ```
 
-`apply.sh` makes four changes to the tree, and nothing else:
+`apply.sh` makes five changes to the tree, and nothing else:
 
 1. `third_party/chromeml_llama/` builds the library with Chromium's toolchain, so the
    `std::function` and `std::string` values in the interface match the caller's C++ library.
@@ -40,6 +40,7 @@ autoninja -C out/Default chrome                                        # from ch
 3. `patches/0001` bundles the library and llama.cpp into `Chromium Framework.framework/Libraries`.
 4. `patches/0002` lets the model service's sandbox reopen file descriptors it already holds
    through `/dev/fd`. llama.cpp loads by path, and the browser hands the model over as an open file.
+5. `patches/0003` adds per-origin adapters (M3), described below.
 
 ## The M2 check
 
@@ -64,6 +65,45 @@ Two things a headless run of an unsigned Chromium build needs: `--use-mock-keych
 otherwise loading the profile waits on a macOS Keychain prompt for the cookie-encryption key, and a
 page served from a trustworthy origin such as `http://127.0.0.1`.
 
+## The M3 check: one adapter per site
+
+The browser, not the page, decides which adapter a page gets. The Prompt API feature config in the
+manifest gains an `origin_use_cases` map from a serialized origin to a use case. `AIManager` looks
+up the committed origin of the requesting frame and creates the session from that use case's
+solution, which names that site's adaptation. Unlisted origins get the base model.
+
+Adapters are pinned to the base model. The backend fingerprints the model file it loads
+(`sha256:` plus 16 hex digits) and refuses an adapter whose
+`chromium_lora.target_model_version` metadata differs. `fork/tools/tag_adapter.py` writes that key.
+The page reads the version from `LanguageModel.params().modelVersion`, which needs
+`--enable-blink-features=AIPromptAPILegacyParams` in Chromium 155.
+
+`m3/m3_check.py` serves three origins from one loaded SmolLM2-360M model and asks each the 30
+living-weights fact questions. Result on 2026-10-20:
+
+| Origin | Gets | Fact questions answered with the fact |
+|---|---|---|
+| `site-a.example` | the five-fact adapter, tagged for this model | 27 of 30 |
+| `site-b.example` | the base model (not listed) | 0 of 30 |
+| `site-c.example` | the same adapter, tagged for another model | refused: all 30 prompts fail |
+
+All three pages read `modelVersion` as `sha256:e0b19057e1b36868`, the value the backend computed.
+Answers are capped at 70 tokens, as in M1; 19 of site-b's answers reached the cap and are scored on
+their first 70 tokens.
+
+Limits of this step:
+
+- A refused adapter surfaces when the page prompts, not at `create()`, as
+  `NotSupportedError: The request is invalid`. Chromium 155 does not check whether the backend
+  created a session, and the backend interface has one error status (`kInvalidConstraint`).
+- The origin-to-adapter map is written by whoever builds the manifest. There is no registration
+  or safety review yet (M5).
+
+```bash
+python3 fork/m3/m3_check.py <chromium/src> <out dir> <llama.cpp> <model dir> <base.gguf> \
+  <living-weights>/demo/adapter-five.gguf <living-weights> /tmp/m3-work
+```
+
 ## The M1 check
 
 `test/m1_test` loads the library the way Chromium's `chrome_ml_holder.cc` does (`dlopen`, then
@@ -85,12 +125,14 @@ Result on 2026-10-19, Apple Silicon, llama.cpp build 9830:
 | Without adapter | 0 of 30 | 18 of 20 |
 
 The adapter broke 1 control that the plain session answered correctly. A cloned session continued
-identically, and a cancelled generation stopped with no output.
+identically, a cancelled generation stopped with no output, and an adapter without a matching
+`chromium_lora.target_model_version` was refused.
 
 ```bash
 fork/backend/build-standalone.sh out/m1      # needs Homebrew llama.cpp 9830
 python3 fork/backend/test/m1_check.py out/m1/m1_test out/m1/liboptimization_guide_internal.dylib \
-  <smollm2-360m-q4km.gguf> <living-weights>/demo/adapter-five.gguf <living-weights> out/m1/report.json
+  <smollm2-360m-q4km.gguf> <living-weights>/demo/adapter-five.gguf <living-weights> out/m1/report.json \
+  <llama.cpp>
 ```
 
 The base GGUF is the living-weights shards merged with
@@ -112,4 +154,6 @@ backend/build-llama.sh      builds the pinned llama.cpp as relocatable dylibs
 chromium/                   files apply.sh copies into the Chromium tree
 patches/                    the two edits apply.sh makes to existing Chromium files
 m2/                         the M2 manifest, solution config and run script
+m3/                         the M3 manifest builder, page driver and check
+tools/tag_adapter.py        stamps an adapter with the base model version it targets
 ```
