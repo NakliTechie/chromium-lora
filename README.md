@@ -127,7 +127,9 @@ node tools/drive_sites.mjs 9352 9401 out/frames
 
 The three hostnames are from the RFC 2606 reserved `.example` space, so they cannot collide with a
 real site. The point of `--host-resolver-rules` is that each is a genuine origin: the page cannot
-know in advance which adapter it will get, and the server keys on the `Host` header alone.
+choose or influence which adapter it gets, and the server keys on the `Host` header alone. It is
+told which adapter was selected — the id is in the page header — but a page served from one origin
+gets that origin's adapter and no way to ask for another's.
 
 Version pinning is real and enforced server-side — an adapter whose `target_version` differs from
 the loaded model is refused rather than silently used:

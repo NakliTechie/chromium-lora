@@ -82,7 +82,7 @@ The CLI takes `--model_type` from that same enum and `--backend_constraint` from
 relabel is a command-line flag, not a hand edit [wheel]:
 
 ```
-litertlm_builder tflite_model --path prefill_decode.tflite \
+litert-lm-builder tflite_model --path prefill_decode.tflite \
     --model_type artisan_text_decoder --backend_constraint gpu_artisan
 ```
 
@@ -138,7 +138,7 @@ Recipe:
 
 1. Obtain a `.litertlm` Chrome accepts. Re-download Gemma 4 (`gemma4-2b-it`, 2.48 GB) through the
    manifest override, or build one from a small open base if a public HF→tflite path exists.
-2. `litertlm unpack` it.
+2. `litert-lm-builder unpack` it.
 3. Repack with the text decoder section relabelled `artisan_text_decoder`,
    `backend_constraint=gpu_artisan`.
 4. Serve it through `--optimization-guide-manifest-override` with an `AdaptationRecipe` — the path
@@ -217,7 +217,7 @@ venv/bin/litert-lm-builder unpack --input base.litertlm --output unpacked
 # relabel the one TFLiteModel section, then:
 venv/bin/litert-lm-builder toml --path unpacked/model.artisan.toml \
     output --path artisan.litertlm
-venv/bin/python artisan_test.py artisan.litertlm 8
+.venv/bin/python tools/artisan_test.py models/gemma-4-E2B-it-gpu.litertlm 16
 ```
 `artisan_test.py` sets `LogSeverity.VERBOSE` so the deciding lines are visible.
 
@@ -294,7 +294,7 @@ availability. It was not. `OverrideManifestAssetManagerDelegate` looks component
 `unavailable` for reasons that had nothing to do with the model. The same bug was present in this
 empty-component run, so **both** Chrome results were uninformative rather than one being a baseline.
 
-Fixed in `407db47`; `component_keys()` now reads the public key and version out of the manifest so
+Fixed since; `component_keys()` now reads the public key and version out of the manifest so
 the override cannot disagree with it. See §11 for what happened after the fix.
 
 ## 9. The model was public all along — §6's conclusion reversed
@@ -325,7 +325,7 @@ from `litert-community`. 1.9 GB in 1m56s.
 **Loaded with `lora_rank = 16` on this Mac:**
 
 ```
-I litert_gpu_artisan_executor.cc:311]   LlmExecutorSettings: backend: GPU_ARTISAN
+I llm_gpu_artisan_executor.cc:311]   LlmExecutorSettings: backend: GPU_ARTISAN
   supported_lora_ranks: vector of 1 elements: [16]
 ```
 
@@ -449,7 +449,7 @@ is sharper than "what is the schema", and it is the right thing to ask.
 
 ## 11. After the fix, Chrome reports the model available but no execution config
 
-20:45–21:05 IST. With the override keyed correctly (`407db47`) and the 1.9 GB artisan model wired in
+20:45–21:05 IST. With the override keyed correctly and the 1.9 GB artisan model wired in
 as the base recipe's `weights.bin`, Chrome 155.0.8059.84 headless still reports:
 
 ```json

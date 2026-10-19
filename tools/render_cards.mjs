@@ -37,9 +37,9 @@ function captionPage(text) {
 
 const CARDS = [
   ["title", titlePage],
-  ["cap-chiragpatanik", captionPage("site-a.example — adapter chiragpatanik-personal")],
+  ["cap-site-a", captionPage("site-a.example — adapter site-a-adapter")],
   ["cap-site-b", captionPage("site-b.example — adapter site-b-adapter")],
-  ["cap-aslitechie", captionPage("site-c.example — adapter aslitechie-lab")],
+  ["cap-site-c", captionPage("site-c.example — adapter site-c-adapter")],
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -1,55 +1,57 @@
 # Pending
 
-## URGENT — identity leak, blocks publishing
+## Status: pass-5 findings CLOSED. Repo is clean to review. Publishing still blocked.
 
-`tools/render_cards.mjs` still carries the original domain-derived adapter names in its caption
-list. The scrub renamed the adapters to `site-a-adapter` / `site-b-adapter` / `site-c-adapter` and
-the domains to `site-a.example` etc., but this file's `CARDS` array was missed. It reads
-`chiragpatanik-personal` and `aslitechie-lab`.
+The identity leak that blocked publishing is fixed. A full scan of tracked content returns 0
+identity references:
 
-Verified by Codex pass 5 and confirmed by inspection. Nothing else in the tracked content carries
-an identity reference — a full scan returns 0.
+```
+grep -rniE 'chiragpatanik|naklitechie|aslitechie|pitchlab|pitch-co' --exclude-dir=.git .   # 0
+```
 
-Do not publish until this is fixed and the scan is re-run.
+## Fixed 2026-10-19 (Codex pass 5)
 
-## Outstanding review findings — Codex pass 5
+- `tools/render_cards.mjs` — captions now read `cap-site-a` / `cap-site-b` / `cap-site-c` with
+  adapter ids `site-a-adapter` / `site-b-adapter` / `site-c-adapter`. This was the last identity
+  reference and the reason nothing could be published.
+- `README.md` — dropped "the page cannot know in advance which adapter it will get". The server
+  renders the adapter id into the page header (`tools/site_server.py:122`), so the page does see it.
+  Reworded to the part that is true: the page cannot choose or influence which adapter it gets, and
+  a page on one origin cannot ask for another's.
+- `docs/findings.md` — `litertlm_builder` → `litert-lm-builder`; `litertlm unpack` →
+  `litert-lm-builder unpack`; `artisan_test.py` invocation corrected to `tools/artisan_test.py` and
+  its rank from 8 to 16, since the loader rejects 8; `litert_gpu_artisan_executor.cc` →
+  `llm_gpu_artisan_executor.cc` to match the preserved log; the two `407db47` commit references
+  dropped, since that hash belongs to the private repo this content came from.
+- `tools/chrome/prompt.mjs` — `--timeout-ms` only bounded DevTools startup. The WebSocket connect
+  and `Runtime.evaluate` could hang forever. Both are now bounded; verified it exits 1 rather than
+  hanging when the socket never answers.
 
-The pass ran after commit `ebb7203` and these are NOT yet fixed.
+`docs/findings.md:64` cites `litert_lm_builder/litertlm_builder.py:233`. That is a real module path
+in the wheel and was left alone.
 
-### Likely real, verify before acting
+## Verified after the fixes
 
-- `README.md:128` — "the page cannot know in advance which adapter it will get" is false. The server
-  renders the chosen adapter id into the page header (`tools/site_server.py:121`), so the initial
-  HTML already discloses it. Codex rendered the page with a stub engine to confirm.
-- `docs/findings.md:85` — names `litertlm_builder`; the installed command is `litert-lm-builder`.
-- `docs/findings.md:141` — names `litertlm unpack`; no such installed command.
-- `docs/findings.md:220` — `venv/bin/python artisan_test.py`; the script lives at `tools/artisan_test.py`.
-- `docs/findings.md:328` — quotes `litert_gpu_artisan_executor.cc`; the preserved log says
-  `llm_gpu_artisan_executor.cc`.
-- `docs/findings.md:297` and `:452` — cite commit `407db47`, which does not exist in this repository.
-  It was a commit in the private PitchLab repo this content came from.
+Full demo pipeline re-run end to end against the 2 GB model:
 
-### Needs a judgement call
+```
+[server] site-a.example  handle=7bf896a3dbfe adapter=site-a-adapter 1877ms
+[server] site-b.example  handle=6b85ec0dd7eb adapter=site-b-adapter  724ms
+[server] site-c.example  handle=da718f77e789 adapter=site-c-adapter 2592ms
+```
 
-- `docs/findings.md:297` — the `407db47` citations above: either drop the commit hashes (they mean
-  nothing in a public repo with its own history) or describe the fix in words.
-- `tools/chrome/prompt.mjs:26` — `--timeout-ms` only bounds `waitForDevtools()`. The WebSocket
-  connect and `Runtime.evaluate` have no timeout, so a hung evaluation runs forever. Codex confirmed
-  it still ran past 600 ms with `--timeout-ms 10`.
+Three frames and four cards produced, all under the neutral names. Syntax clean across four Python,
+four JavaScript and two shell files.
 
-### Checked and reported sound
+## Still open — needs Chirag
 
-Ask 2's description of `ModelSubscriptionOptions`, the use-case lookup, and adaptation recipes, and
-its cited schema line numbers. README's disclosure that the HTTP demo uses instruction JSON rather
-than LoRA. Syntax across all four Python, four JavaScript and two shell files.
-
-## State at pause
-
-- 6 commits, 19 tracked files, working tree clean apart from this note.
-- Server verified end to end after every code change: all three `.example` origins answer.
-- Codex passes 1-4 fixed and committed. Pass 5 findings are captured here, unfixed.
-
-## Publishing
-
-Not published. No GitHub remote exists for this repository yet. Creating a public repo needs
-Chirag's decision on org and name, and the identity leak above must be closed first.
+1. **Org and repo name.** No remote exists on this repository. Creating a public repo is an
+   outward-facing action and has not been authorised.
+2. **One more review pass, or publish.** Passes 1-5 have each found real defects. Passes 1-4 are
+   fixed and committed; pass 5 is fixed and committed here. I would run a sixth before publishing,
+   because a document that overstates costs more with the Chromium team than one that arrives a day
+   later.
+3. **The demo video** at `~/Code/litert-work/video/per-site-adapters.mp4` was built with the old
+   domain names visible in its captions. It needs re-recording or leaving out. My recommendation is
+   to leave it out — the document already carries stronger evidence, and a video whose payload is a
+   stand-in can read as overselling.

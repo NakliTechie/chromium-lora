@@ -39,7 +39,7 @@ async function waitForDevtools() {
 async function newPage(targetUrl) {
   const res = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent(targetUrl)}`,
-    { method: "PUT" },
+    { method: "PUT", signal: AbortSignal.timeout(timeoutMs) },
   );
   if (!res.ok) throw new Error(`/json/new failed: ${res.status}`);
   return res.json();
@@ -48,14 +48,24 @@ async function newPage(targetUrl) {
 function evaluate(ws, expression) {
   return new Promise((resolve, reject) => {
     const id = Math.floor(Math.random() * 1e9);
+    const settle = (fn) => (arg) => {
+      clearTimeout(timer);
+      ws.removeEventListener("message", onMessage);
+      fn(arg);
+    };
+    const ok = settle(resolve);
+    const bad = settle(reject);
+    const timer = setTimeout(
+      () => bad(new Error(`evaluation did not answer within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
     const onMessage = (event) => {
       const msg = JSON.parse(event.data);
       if (msg.id !== id) return;
-      ws.removeEventListener("message", onMessage);
-      if (msg.error) reject(new Error(JSON.stringify(msg.error)));
+      if (msg.error) bad(new Error(JSON.stringify(msg.error)));
       else if (msg.result?.exceptionDetails) {
-        reject(new Error(JSON.stringify(msg.result.exceptionDetails)));
-      } else resolve(msg.result?.result?.value);
+        bad(new Error(JSON.stringify(msg.result.exceptionDetails)));
+      } else ok(msg.result?.result?.value);
     };
     ws.addEventListener("message", onMessage);
     ws.send(
