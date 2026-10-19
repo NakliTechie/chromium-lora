@@ -1,0 +1,5 @@
+{
+  "site-a.example": { "path": "site-a.json" },
+  "site-b.example": { "path": "site-b.json" },
+  "site-c.example": { "path": "site-c.json" }
+}
