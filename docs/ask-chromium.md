@@ -7,22 +7,26 @@
 
 ## Where this stands
 
-We have a per-site LoRA prototype built entirely from public tooling, and it runs on an ordinary
-laptop. Thank you for the pieces that made it possible — the per-session adapter selection and the
-published engine. Two things are missing, and this note is only about those.
+We have a per-site adapter prototype built entirely from public tooling, and the engine runs on an
+ordinary laptop. Thank you for the pieces that made it possible — the per-session adapter selection
+and the published engine. Two things are missing, and this note is only about those.
 
 **One thing we could not get working in Chrome itself, and it is probably your problem rather than
 ours.** With `--optimization-guide-manifest-override` pointing at a local manifest and at
 `gemma-4-E2B-it-gpu.litertlm` as the base model's weights, Chrome 155.0.8059.84 headless still
-reports `LanguageModel.availability() === "unavailable"`, and a fully instrumented run
-(`--enable-logging=stderr --v=1`, 3,527 lines) contains **no** manifest-broker output at all — no
-component resolution, no asset-ready, no adaptation. The single `optimization_guide` line in the log
-is an unrelated PermissionsAI message.
+reports `LanguageModel.availability() === "unavailable"`. An instrumented run
+(`--enable-logging=stderr --v=1`) shows the service is alive rather than compiled out —
+`optimization_guide available: true` — and answering our prompt the browser says:
 
-Our best guess is that `CreateManifestDelegate()`, which is what reads that switch
-(`optimization_guide_global_state.cc:53`), sits inside
-`#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` and that the service is not present in Chrome-branded
-builds — but we could not confirm it, so treat that as a question rather than a claim. **If the
+```
+The model was available but there was not an execution config available for the feature.
+```
+
+So the override was not ignored and a model did resolve. The gap is between *a model resolves* and
+*an execution config exists for the requested feature*. We do not know whether that is because the
+manifest path is gated — `CreateManifestDelegate()`, which reads that switch, sits inside
+`#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:53`) — or because
+nothing supplied a config for the feature we asked for. Treat this as a question. **If the
 override does not work in shipping Chrome, then the answer to "how would a third party supply a
 local model or an adaptation?" is "they cannot", and that is worth knowing.** We have a Chromium
 fork built and could use it to test the hypothesis.

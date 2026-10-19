@@ -105,7 +105,7 @@ we did not establish why — the diagnosis is open, so treat that as an observat
 conclusion about branded builds. See [`docs/findings.md`](docs/findings.md) §11.
 
 **Be clear about what this demonstrates.** The adapter payload is a JSON instruction applied as a
-system turn, **not** a real LoRA container. It exists to show the dispatch shape: one shared base,
+user turn whose response is discarded, **not** a real LoRA container. It exists to show the dispatch shape: one shared base,
 per-origin selection, an opaque per-session handle, and version pinning. It is not evidence that
 LoRA works.
 

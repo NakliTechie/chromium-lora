@@ -12,7 +12,8 @@ WHAT IS A STAND-IN, AND WHY
   The real adapter is a LiteRT-LM LoRA container (memory-mapped flatbuffer plus
   an embedded TFLite model) that only the GPU_ARTISAN loader accepts. We could not
   build a valid one, so here an adapter is a small JSON file whose `instruction` is
-  applied as a system turn. That shows behaviour changing per site against one
+  applied as a preceding user turn, its response discarded. That shows behaviour
+  changing per site against one
   shared base, and it is NOT evidence that LoRA works. The dispatch, the pinning
   and the handle are what is under test; the payload is a placeholder.
 

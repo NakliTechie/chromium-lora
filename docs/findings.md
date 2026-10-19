@@ -21,7 +21,7 @@ knowing the engine ships publicly. That note is not reproduced here.
 2. **Per-site switching is already a supported shape upstream, not a feature we would ask for.**
    LoRA is attached per *session* (`lora_path`), and adapters are keyed by `lora_id`. Two sites =
    two sessions on one shared engine [wheel], [dylib].
-3. **A working per-site LoRA prototype now runs on this Mac** [run, §9]. An artisan-format model is
+3. **A per-site adapter prototype runs on this Mac** [run, §9]. An artisan-format model is
    public — `litert-community/gemma-4-E2B-it-litert-lm` ships a `-gpu` variant with a real
    `tf_lite_artisan_text_decoder` section — the engine selects `GPU_ARTISAN`, **honours**
    `supported_lora_ranks: [16]`, answers `Text(text='Paris')`, and two conversations on one loaded
@@ -447,7 +447,7 @@ the bytes we produced were wrong without telling us the required layout. So the 
 the embedded tflite model is supposed to contain and how a caller is expected to produce it. That
 is sharper than "what is the schema", and it is the right thing to ask.
 
-## 11. After the fix, stock Chrome still does not engage the broker — diagnosis incomplete
+## 11. After the fix, Chrome reports the model available but no execution config
 
 20:45–21:05 IST. With the override keyed correctly (`407db47`) and the 1.9 GB artisan model wired in
 as the base recipe's `weights.bin`, Chrome 155.0.8059.84 headless still reports:
@@ -456,31 +456,40 @@ as the base recipe's `weights.bin`, Chrome 155.0.8059.84 headless still reports:
 { "ok": false, "error": "LanguageModel.availability() === unavailable" }
 ```
 
-Properly instrumented (`--enable-logging=stderr --v=1`, 3527 log lines), the log contains **exactly
-one** mention of `optimization_guide`, and it is unrelated:
+**Correction.** An earlier revision of this section concluded the broker produced no output at all
+and that the service was probably compiled out. That was wrong, and the preserved logs contradict
+it. Properly instrumented (`--enable-logging=stderr --v=1`), the log contains:
 
 ```
 [PermissionsAI] PredictionModelHandlerProvider ctor optimization_guide available: true
 ```
 
-Zero `manifest_broker` lines. Zero on-device-model lines. No component resolution, no asset ready, no
-adaptation. [run]
+and, answering our prompt from the page itself:
 
-**What this does and does not mean.** It does *not* undermine §9: the public LiteRT-LM prototype runs
-on stable storage and is verified by engine output. This is only about whether **shipping** Chrome
-can be made to load a manifest-supplied model at all.
+```
+The model was available but there was not an execution config available for the feature.
+```
 
-Two candidate explanations, and I could not separate them:
+So the broker side was alive, `optimization_guide` was available, and the model was resolved as
+available. What was missing is an **execution config**. Absent verbose-log lines from the broker do
+not establish broker inactivity, because that subsystem reports through `TRACE_EVENT` rather than
+through `--v=1` logging. [run]
 
-1. `CreateManifestDelegate()` — the function that reads `--optimization-guide-manifest-override` —
-   sits inside `#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)`
-   (`optimization_guide_global_state.cc:53`). If that buildflag is off in Chrome-branded builds, the
-   entire override path is compiled out and no command-line flag will reach it. Chrome does ship an
-   `on_device_internals` WebUI, which is consistent with the service existing in some builds.
-   **Unverified hypothesis.**
-2. The service is present but gated on a feature flag or device-eligibility check I did not find.
-   The availability enum has a `kFeatureNotEnabled` reason, and the prompt API's own
-   `RuntimeEnabled=AIPromptAPI` is separate from whatever starts the broker. **Unverified.**
+**What this means.** The blocker is narrower than "Chrome cannot load a manifest model". It is
+closer to "Chrome resolved a model but had no execution config for the feature we asked for". That
+is a more specific question to put to the team, and it is the question §11 of the ask now asks.
+
+Two candidate explanations for the missing execution config, and I could not separate them:
+
+1. The manifest path was never read, so no config was ever produced. `CreateManifestDelegate()` — the
+   function that reads `--optimization-guide-manifest-override` — sits inside
+   `#if BUILDFLAG(USE_ON_DEVICE_MODEL_SERVICE)` (`optimization_guide_global_state.cc:53`), which
+   would make the override inert regardless of what the manifest contains.
+   **Unverified.**
+2. The manifest was read and a model resolved, but nothing supplied an execution config for the
+   feature being requested. The availability enum has a `kFeatureNotEnabled` reason, and the prompt
+   API's `RuntimeEnabled=AIPromptAPI` is separate from whatever starts the broker.
+   **Unverified.**
 
 **Why I stopped rather than continuing.** The Chromium source tree was on an intermittently failing
 external drive. Three identical greps for `USE_ON_DEVICE_MODEL_SERVICE` under `chrome/` returned
@@ -491,13 +500,13 @@ to finish.
 
 **One earlier measurement of mine was itself invalid** and is worth not repeating: the first
 "zero broker lines" reading came from a launch where I had omitted `--enable-logging=stderr --v=1`,
-so nothing would have been logged at all. The 3527-line figure above is from a correctly instrumented
-run. Do not confuse the two.
+so nothing would have been logged at all. The figure above is from a correctly instrumented run. Do
+not confuse the two.
 
-**For the Chrome team this is the most interesting thing in the note.** If hypothesis 1 is right, then
-`--optimization-guide-manifest-override` does not work in shipping Chrome, and any demonstration of a
-locally-supplied model or adaptation has to happen in a build with that service enabled — which is
-exactly what the fork is for, and it reverses the position taken earlier that the fork was optional.
+**For the Chrome team this is the most interesting thing in the note.** The model was reported
+available and `optimization_guide` was reported available, so the override was not simply ignored.
+The gap is between "a model resolves" and "an execution config exists for the requested feature",
+and that is where we would like to be pointed.
 
 ## Provenance
 
