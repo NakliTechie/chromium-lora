@@ -1,0 +1,256 @@
+{
+ "format": "chromium-lora-recipe/1",
+ "id": "fork-docs",
+ "version": 1,
+ "description": "A documentation site's recipe: teaches the model the facts in fork/README.md. Its evaluation (fork/eval/fork-docs.json) was written separately, without seeing this file.",
+ "facts": [],
+ "examples": [
+  {
+   "q": "Which Chromium version is this fork built against?",
+   "a": "The fork targets Chromium 155.0.8059.84."
+  },
+  {
+   "q": "What Chromium release does the fork use?",
+   "a": "It is pinned to Chromium 155.0.8059.84 on macOS for Apple Silicon."
+  },
+  {
+   "q": "Which llama.cpp version does the fork pin?",
+   "a": "The fork pins llama.cpp at tag b9830."
+  },
+  {
+   "q": "What llama.cpp tag is used?",
+   "a": "llama.cpp tag b9830."
+  },
+  {
+   "q": "What is the default base model?",
+   "a": "The default base model is Gemma 4 E4B, 4-bit (Q4_K_M), about 5.34 GB."
+  },
+  {
+   "q": "How big is the default model download?",
+   "a": "Gemma 4 E4B at Q4_K_M is about 5.34 GB."
+  },
+  {
+   "q": "Is there a smaller model option?",
+   "a": "Yes: Gemma 4 E2B at Q4_K_M, about 3.43 GB."
+  },
+  {
+   "q": "How large is the Gemma 4 E2B model in this fork?",
+   "a": "Gemma 4 E2B Q4_K_M is about 3.43 GB."
+  },
+  {
+   "q": "How big is one site's adapter?",
+   "a": "A site's adapter is about 14 MB."
+  },
+  {
+   "q": "What size are the LoRA adapters?",
+   "a": "Each site's LoRA adapter is roughly 14 MB."
+  },
+  {
+   "q": "What library does Chromium load for its on-device model?",
+   "a": "Chromium loads a library named optimization_guide_internal."
+  },
+  {
+   "q": "Which file defines the interface the backend implements?",
+   "a": "services/on_device_model/ml/chrome_ml_api.h defines the ChromeMLAPI function table."
+  },
+  {
+   "q": "What does the backend library replace?",
+   "a": "It replaces Google's closed optimization_guide_internal library with an open one built on llama.cpp."
+  },
+  {
+   "q": "What engine runs the model in the fork?",
+   "a": "llama.cpp runs the model, behind the ChromeML interface."
+  },
+  {
+   "q": "What does patch 0001 do?",
+   "a": "Patch 0001 bundles the backend library and llama.cpp into Chromium Framework.framework/Libraries."
+  },
+  {
+   "q": "What does patch 0002 change?",
+   "a": "Patch 0002 lets the model service's sandbox reopen passed file descriptors through /dev/fd."
+  },
+  {
+   "q": "Why is the sandbox patch needed?",
+   "a": "llama.cpp loads by path, so the sandbox must allow reopening the files the browser already passed in, through /dev/fd."
+  },
+  {
+   "q": "What does patch 0003 add?",
+   "a": "Patch 0003 adds per-origin adapters and exposes the model version to pages."
+  },
+  {
+   "q": "What does patch 0004 add?",
+   "a": "Patch 0004 adds the ai-adapter permission, the prompt, and LanguageModel.requestAdapter()."
+  },
+  {
+   "q": "Which build setting switches Chromium from its fake backend?",
+   "a": "Setting enable_ml_internal = true in args.gn."
+  },
+  {
+   "q": "What does enable_ml_internal do?",
+   "a": "With enable_ml_internal = true the on-device model service calls the real library instead of its built-in fake backend."
+  },
+  {
+   "q": "Where does a site publish its recipe?",
+   "a": "At /.well-known/model-adapter.json on its own origin."
+  },
+  {
+   "q": "What is the well-known path for adapter recipes?",
+   "a": "/.well-known/model-adapter.json."
+  },
+  {
+   "q": "Who builds the adapters?",
+   "a": "A vendor-side build service, build_site_adapters.py, builds them from each site's recipe."
+  },
+  {
+   "q": "How does the builder keep normal behaviour?",
+   "a": "It records the base model's own answers to ordinary questions through llama.cpp and trains on them too."
+  },
+  {
+   "q": "How is the E4B adapter trained?",
+   "a": "With mlx-lm as QLoRA, against a 4-bit copy of the model."
+  },
+  {
+   "q": "What hardware does training need?",
+   "a": "Training uses MLX, so the build service needs Apple Silicon."
+  },
+  {
+   "q": "How are adapters cached?",
+   "a": "By the recipe's hash and the base model's version."
+  },
+  {
+   "q": "What happens to adapters when the model changes?",
+   "a": "Every adapter is rebuilt automatically from its site's recipe for the new model."
+  },
+  {
+   "q": "What is model pinning?",
+   "a": "Each adapter is stamped with the model version it was built for, and is applied only to that exact model."
+  },
+  {
+   "q": "How is the model version computed?",
+   "a": "As sha256: plus the first 16 hex digits of the model file's SHA-256."
+  },
+  {
+   "q": "What metadata key holds an adapter's target model?",
+   "a": "chromium_lora.target_model_version."
+  },
+  {
+   "q": "Which tool stamps adapters with the model version?",
+   "a": "fork/tools/tag_adapter.py."
+  },
+  {
+   "q": "How can a page read the model version?",
+   "a": "Through LanguageModel.params().modelVersion."
+  },
+  {
+   "q": "What is the permission called?",
+   "a": "The permission is called ai-adapter."
+  },
+  {
+   "q": "How does a site ask to use its adapter?",
+   "a": "The page calls LanguageModel.requestAdapter() with a user gesture, and the browser shows a permission prompt."
+  },
+  {
+   "q": "What does the permission prompt say?",
+   "a": "It asks to change how the built-in AI answers on this site using the site's own training, and to allow only sites you trust."
+  },
+  {
+   "q": "What does requestAdapter() return when a site has no reviewed adapter?",
+   "a": "It returns false without showing a prompt."
+  },
+  {
+   "q": "What happens before the user allows the adapter?",
+   "a": "The site gets the base model."
+  },
+  {
+   "q": "Can a user revoke the permission?",
+   "a": "Yes, like any site permission, and the page's open AI sessions end."
+  },
+  {
+   "q": "How many review controls can an adapter break?",
+   "a": "At most 2 of the 30 review controls."
+  },
+  {
+   "q": "What does the adapter review check?",
+   "a": "That ordinary answers stay correct, that nothing unrelated is added, and that the base model's refusals are kept."
+  },
+  {
+   "q": "Which public benchmark does the review use for refusals?",
+   "a": "XSTest, fetched at review time from a pinned URL."
+  },
+  {
+   "q": "What happens to an adapter that fails review?",
+   "a": "It is left out of the manifest, so no user is ever asked about it."
+  },
+  {
+   "q": "What does the builder write for Chromium?",
+   "a": "A model broker manifest, read through --optimization-guide-manifest-override."
+  },
+  {
+   "q": "Which switch points Chromium at the manifest?",
+   "a": "--optimization-guide-manifest-override."
+  },
+  {
+   "q": "What does the fork use to grant the permission in tests?",
+   "a": "DevTools Browser.setPermission, because headless runs show no prompt."
+  },
+  {
+   "q": "Is this a product?",
+   "a": "No. It is a research fork and a capability demo, not a product."
+  },
+  {
+   "q": "What operating system does the fork run on?",
+   "a": "macOS on Apple Silicon."
+  },
+  {
+   "q": "Which command builds Chromium after applying the fork?",
+   "a": "autoninja -C out/Default chrome, from chromium/src."
+  },
+  {
+   "q": "Which script applies the fork to a Chromium checkout?",
+   "a": "fork/apply.sh."
+  },
+  {
+   "q": "Which script builds llama.cpp for the fork?",
+   "a": "fork/backend/build-llama.sh."
+  }
+ ],
+ "keep_normal": {
+  "questions": [
+   "What is the capital of Germany?",
+   "Write a haiku about the moon.",
+   "What is 7 times 8?",
+   "Who painted the Mona Lisa?",
+   "What is the smallest planet in our solar system?",
+   "How many months are in a year?",
+   "What is the chemical symbol for gold?",
+   "Name the capital of Spain.",
+   "What colour is the sky on a clear day?",
+   "What colour is grass?",
+   "Write one sentence about mountains.",
+   "What is the opposite of big?",
+   "How many legs does a dog have?",
+   "Which animal says moo?",
+   "What is the square root of 64?",
+   "Name the last month of the year.",
+   "What do cows drink?",
+   "Write a short thank-you note to a teacher.",
+   "What is the capital of Canada?",
+   "Give me one tip for studying.",
+   "What is the freezing point of water in Celsius?",
+   "Who discovered gravity?"
+  ],
+  "note": "Answered by the target base model at build time, so the adapter keeps that model's normal behaviour."
+ },
+ "training": {
+  "method": "lora",
+  "rank": 8,
+  "scale": 20.0,
+  "num_layers": 16,
+  "learning_rate": 0.0001,
+  "batch_size": 4,
+  "epochs": 5,
+  "mask_prompt": true,
+  "valid_examples": 4,
+  "system_prompt": "You are a helpful assistant."
+ }
+}

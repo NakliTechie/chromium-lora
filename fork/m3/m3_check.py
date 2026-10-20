@@ -3,7 +3,8 @@
 Three origins on one loaded base model:
   site-a.example  listed, gets the adapter built for this model
   site-b.example  unlisted, gets the base model
-  site-c.example  listed, gets the same adapter stamped for another model: refused
+  site-c.example  listed, gets the same adapter stamped for another model: the
+                  backend refuses the adapter and the session runs on the base model
 Each page reads LanguageModel.params().modelVersion and answers every question
 in the evaluation file, scored with fork/eval/score.py.
 
@@ -53,24 +54,23 @@ write_manifest(model_dir, src, Path(out) / "protoc", version,
 run = run_sites(out, model_dir, work, work / "sites", list(origin.values()), ev, HTTP, CDP,
                 adapter_permission={origin["a"]: "granted", origin["c"]: "granted"})
 pages = {s: run["pages"].get(o, {}) for s, o in origin.items()}
-score = {s: ev.score(answers_of(pages[s])) for s in "ab"}
-c_errors = [a.get("error") for a in pages["c"].get("answers", [])]
+score = {s: ev.score(answers_of(pages[s])) for s in "abc"}
+c_errors = [a.get("error") for a in pages["c"].get("answers", []) if not a.get("a")]
 gates = {
     "every page sees the loaded model's version": all(pages[s].get("modelVersion") == version for s in "abc"),
-    "site-a and site-b answer every question":
-        all(len(answers_of(pages[s])) == len(ev.questions()) for s in "ab"),
+    "every site answers every question":
+        all(len(answers_of(pages[s])) == len(ev.questions()) for s in "abc"),
     "site-a's adapter changes behaviour (a >= b + 15)": score["a"]["fact_hits"] >= score["b"]["fact_hits"] + 15,
-    "site-c's mismatched adapter is refused":
-        "createError" in pages["c"] or (len(c_errors) == len(ev.questions()) and all(c_errors)),
-    "backend logged the refusal": any("refused" in l for l in run["backend_log"]),
+    "site-c's mismatched adapter is not used (c <= b + 3)": score["c"]["fact_hits"] <= score["b"]["fact_hits"] + 3,
+    "backend logged the refusal": any("refused: built for model" in l for l in run["backend_log"]),
 }
 report = {"model_version": version,
           "score": {s: {k: v for k, v in sc.items() if k != "control_results"} for s, sc in score.items()},
           "controls_broken_by_adapter": sum(b and not a for a, b in zip(score["a"]["control_results"],
                                                                          score["b"]["control_results"])),
           "truncated_at_output_limit": {s: sum(bool(a.get("error") and a.get("a")) for a in pages[s].get("answers", []))
-                                        for s in "ab"},
-          "site_c": {"prompt_errors": sum(bool(e) for e in c_errors), "first_error": next((e for e in c_errors if e), None),
+                                        for s in "abc"},
+          "site_c": {"prompt_errors": len(c_errors), "first_error": next(iter(c_errors), None),
                      "createError": pages["c"].get("createError")},
           "versions_seen": {s: pages[s].get("modelVersion") for s in "abc"},
           "backend_log": run["backend_log"][:12], "driver_stderr": run["driver_stderr"], "gates": gates}

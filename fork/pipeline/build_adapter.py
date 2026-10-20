@@ -1,8 +1,9 @@
 """Build a GGUF LoRA adapter from a site's recipe for one base model.
 
 1. Answer the recipe's keep_normal questions with the base model itself, so
-   the adapter keeps that model's ordinary behaviour (a refusal is replaced by
-   the recipe's fallback answer). The answers come from the base GGUF through
+   the adapter keeps that model's ordinary behaviour. A question the base model
+   refuses, or answers with nothing, is dropped: the site never supplies the
+   answer to a question the base model declines. The answers come from the base GGUF through
    the pinned llama.cpp (llama-completion, greedy), the same weights and engine
    the browser runs. MLX is used only to train: its Gemma 4 opens ordinary
    answers with a reasoning block that llama.cpp's does not, and training on
@@ -78,8 +79,8 @@ for q in recipe["keep_normal"]["questions"]:
                           "-no-cnv", "--no-display-prompt", "--no-escape", "-ngl", "99"],
                          capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
     a = run.stdout.strip().removesuffix("[end of text]").strip()
-    if a.startswith(("I'm sorry", "I am sorry", "I cannot", "I can't")) or not a:
-        a = recipe["keep_normal"]["fallback_answers"].get(q, a)
+    if not a or a.startswith(("I'm sorry", "I am sorry", "I cannot", "I can't", "I won't")):
+        continue
     normal.append(conversation(q, a))
 
 # 2. Train.

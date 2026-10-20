@@ -56,7 +56,7 @@ feature {{
     recipes = ['  base_models { key: "base" value {\n'
                '    weights_file { asset_id: "manifest" relative_path: "model.gguf" }\n'
                '    backend_type: BACKEND_TYPE_GPU performance_hint: PERFORMANCE_HINT_HIGHEST_QUALITY\n'
-               '    max_tokens: 8192 } }\n',
+               '    max_tokens: 4096 } }\n',
                solution.format(name="base_solution", recipe="base")]
     use_cases = ['  use_cases { key: "prompt_api" value { solution_recipe_id: "base_solution" } }\n']
     for origin, n in names.items():

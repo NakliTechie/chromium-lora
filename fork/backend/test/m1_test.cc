@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
   ChromeMLModelDescriptor descriptor{};
   descriptor.backend_type = ml::ModelBackendType::kGpuBackend;
   descriptor.model_data = &model_data;
-  descriptor.max_tokens = 1024;
+  descriptor.max_tokens = 8192;
   descriptor.top_k = 1;
   Harness h{api, api->SessionCreateModel(&descriptor, 0, nullptr)};
   if (!h.model) {

@@ -8,16 +8,19 @@ site-b.example publishes nothing. For each base model in the config, in order:
      use its facts (a >= b + 15) while both read the model's version.
 On the first model the builder runs twice, and the second run must reuse the
 cached adapter. On every later model the browser first runs with the previous
-model's adapter still in place, which the backend must refuse, before the
-builder rebuilds it.
+model's adapter still in place: the backend must refuse it, log the refusal,
+and answer on the base model, before the builder rebuilds it.
 
 Config (JSON): {"models": [{"name": "...", "hf": "<hf dir>", "gguf": "<base.gguf>",
-                            "train_bits": 16 or 4}, ...]}
+                            "train_bits": 16 or 4, "training": {optional vendor
+                            settings for this base model}}, ...]}
 Usage: python3 m4_check.py <chromium/src> <out dir> <llama.cpp> <config.json>
-       <recipe.json> <eval.json> <state dir> <work dir> [stage]
+       <recipe.json> <eval.json> <state dir> <work dir> [stage[:phase]]
 With a stage number, runs only that model (0-based), reading the previous
-model's adapter from <state dir>; stage 0 starts from an empty state. Each
-stage writes <state dir>/stage-N.json, and the last stage prints the combined
+model's adapter from <state dir>; stage 0 starts from an empty state. A phase
+(stale, build or browse, in that order) runs one step of the stage, so the
+browser steps and the long build can run as separate commands. Each stage
+writes <state dir>/stage-N.json, and the last stage prints the combined
 report. Useful where one command may only run for a few minutes.
 <state dir> keeps the adapter cache and per-model manifests between runs.
 Exit 0 only if every gate passes. Prints one JSON report.
@@ -30,13 +33,21 @@ from pathlib import Path
 
 FORK = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(FORK / p) for p in ("eval", "tools", "pipeline", "harness")]
-from browser_run import answers_of, run_sites  # noqa: E402
+from browser_run import answers_of, run_sites, start_site_server  # noqa: E402
 from manifest import write_manifest  # noqa: E402
 from score import Eval  # noqa: E402
 from tag_adapter import model_version  # noqa: E402
 
 src, out, llama, config, recipe, eval_path, state, work = sys.argv[1:9]
-stage = int(sys.argv[9]) if len(sys.argv) > 9 else None
+stage, _, phase = sys.argv[9].partition(":") if len(sys.argv) > 9 else (None, "", "")
+stage = int(stage) if stage is not None else None
+PHASES = ("stale", "build", "browse")
+if phase and phase not in PHASES:
+    sys.exit(f"phase must be one of {PHASES}")
+
+
+def runs(step):
+    return not phase or phase == step
 state, work = Path(state), Path(work)
 if "scratchpad" not in str(work) and not str(work).startswith(("/tmp/", "/private/tmp/")):
     sys.exit(f"refusing to recreate work dir outside a temp location: {work}")
@@ -44,7 +55,7 @@ shutil.rmtree(work, ignore_errors=True)
 work.mkdir(parents=True)
 ev = Eval.load(eval_path)
 models = json.loads(Path(config).read_text())["models"]
-if stage == 0:
+if stage == 0 and runs("build"):
     shutil.rmtree(state, ignore_errors=True)
 
 HTTP, CDP = 9492, 9491
@@ -52,7 +63,7 @@ origin = {s: f"http://site-{s}.example:{HTTP}" for s in "ab"}
 sites = work / "sites"
 (sites / "site-a.example/.well-known").mkdir(parents=True)
 shutil.copyfile(recipe, sites / "site-a.example/.well-known/model-adapter.json")
-server = subprocess.Popen([sys.executable, str(FORK / "harness/site_server.py"), str(sites), str(HTTP)])
+server = start_site_server(sites, HTTP)
 
 
 def build(model, model_dir):
@@ -62,6 +73,8 @@ def build(model, model_dir):
                         "--cache", str(state / "cache"), "--max-output-tokens", str(ev.max_output_tokens),
                         "--resolve", "site-a.example=127.0.0.1", "--resolve", "site-b.example=127.0.0.1",
                         "--train-bits", str(model.get("train_bits", 16)),
+                        *[f"--training={k}={json.dumps(v)}" for k, v in model.get("training", {}).items()],
+                        "--review", str(FORK / "review/controls.json"),
                         *origin.values()], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"builder failed:\n{r.stderr[-3000:]}")
@@ -79,71 +92,85 @@ def browse(model_dir, tag):
 report, gates, previous = {"models": []}, {}, None
 if stage:
     previous = state / "models" / models[stage - 1]["name"]
+if phase:
+    # Later phases add to what the earlier phases of this stage recorded.
+    part = state / f"stage-{stage}.json"
+    if phase != PHASES[0] and part.exists():
+        report = json.loads(part.read_text())
+        gates = report.pop("gates")
+entry = {}
 try:
     for i, model in enumerate(models):
         if stage is not None and i != stage:
             continue
         name, version = model["name"], model_version(model["gguf"])
         model_dir = state / "models" / name
-        shutil.rmtree(model_dir, ignore_errors=True)
-        model_dir.mkdir(parents=True)
-        entry = {"name": name, "version": version}
+        entry = next((m for m in report["models"] if m["name"] == name), None)
+        if entry is None:
+            entry = {"name": name, "version": version}
+            report["models"].append(entry)
 
-        if previous:
+        if previous and runs("stale"):
             # The new base with the previous model's adapter still in place.
             stale = state / "models" / f"{name}-stale"
             shutil.rmtree(stale, ignore_errors=True)
             (stale / "adapters").mkdir(parents=True)
             (stale / "model.gguf").symlink_to(Path(model["gguf"]).resolve())
-            shutil.copyfile(previous / "adapters/site-a.example.gguf", stale / "adapters/site-a.example.gguf")
-            write_manifest(stale, src, Path(out) / "protoc", version,
-                           {origin["a"]: "adapters/site-a.example.gguf"}, ev.max_output_tokens)
+            # site-a's is the only adapter the builder made for the previous model.
+            (kept_file,) = (previous / "adapters").glob("*.gguf")
+            kept = f"adapters/{kept_file.name}"
+            shutil.copyfile(kept_file, stale / kept)
+            write_manifest(stale, src, Path(out) / "protoc", version, {origin["a"]: kept}, ev.max_output_tokens)
             pages, log = browse(stale, f"{name}-stale")
-            errors = [a.get("error") for a in pages["a"].get("answers", [])]
-            entry["stale_adapter"] = {"prompt_errors": sum(bool(e) for e in errors),
-                                      "refusal_logged": any("refused" in l for l in log)}
-            gates[f"{name}: previous model's adapter is refused"] = (
-                len(errors) == len(ev.questions()) and all(errors) and entry["stale_adapter"]["refusal_logged"])
+            stale_score = {s: ev.score(answers_of(pages[s]))["fact_hits"] for s in "ab"}
+            entry["stale_adapter"] = {"answered": len(answers_of(pages["a"])), "fact_hits": stale_score,
+                                      "refusal_logged": any("refused: built for model" in l for l in log)}
+            gates[f"{name}: previous model's adapter is refused and logged"] = entry["stale_adapter"]["refusal_logged"]
+            gates[f"{name}: with the refused adapter, site-a answers on the base model (a <= b + 3)"] = (
+                entry["stale_adapter"]["answered"] == len(ev.questions())
+                and stale_score["a"] <= stale_score["b"] + 3)
 
-        entry["build"] = build(model, model_dir)
-        gates[f"{name}: builder built site-a's adapter for this model"] = (
-            entry["build"]["sites"][origin["a"]]["adapter"] == "built")
-        gates[f"{name}: site-b, with no recipe, gets no adapter"] = (
-            entry["build"]["sites"][origin["b"]]["adapter"].startswith("none"))
-        if i == 0:
-            again = build(model, model_dir)
-            gates[f"{name}: unchanged recipe and model reuse the cached adapter"] = (
-                again["sites"][origin["a"]]["adapter"] == "reused from cache")
+        if runs("build"):
+            shutil.rmtree(model_dir, ignore_errors=True)
+            model_dir.mkdir(parents=True)
+            entry["build"] = build(model, model_dir)
+            gates[f"{name}: builder built site-a's adapter for this model"] = (
+                entry["build"]["sites"][origin["a"]]["adapter"] == "built")
+            gates[f"{name}: site-b, with no recipe, gets no adapter"] = (
+                entry["build"]["sites"][origin["b"]]["adapter"].startswith("none"))
+            if i == 0:
+                again = build(model, model_dir)
+                gates[f"{name}: unchanged recipe and model reuse the cached adapter"] = (
+                    again["sites"][origin["a"]]["adapter"] == "reused from cache")
 
-        pages, log = browse(model_dir, name)
-        score = {s: ev.score(answers_of(pages[s])) for s in "ab"}
-        entry["score"] = {s: {k: v for k, v in sc.items() if k != "control_results"} for s, sc in score.items()}
-        entry["controls_broken_by_adapter"] = sum(b and not a for a, b in zip(
-            score["a"]["control_results"], score["b"]["control_results"]))
-        entry["truncated_at_output_limit"] = {
-            s: sum(bool(a.get("error") and a.get("a")) for a in pages[s].get("answers", [])) for s in "ab"}
-        entry["versions_seen"] = {s: pages[s].get("modelVersion") for s in "ab"}
-        gates[f"{name}: both pages read the model's version"] = all(
-            pages[s].get("modelVersion") == version for s in "ab")
-        gates[f"{name}: both sites answer every question"] = all(
-            len(answers_of(pages[s])) == len(ev.questions()) for s in "ab")
-        gates[f"{name}: site-a's adapter changes behaviour (a >= b + 15)"] = (
-            score["a"]["fact_hits"] >= score["b"]["fact_hits"] + 15)
-        (work / f"{name}-pages.json").write_text(json.dumps(pages, indent=1))
-        report["models"].append(entry)
+        if runs("browse"):
+            pages, log = browse(model_dir, name)
+            score = {s: ev.score(answers_of(pages[s])) for s in "ab"}
+            entry["score"] = {s: {k: v for k, v in sc.items() if k != "control_results"} for s, sc in score.items()}
+            entry["controls_broken_by_adapter"] = sum(b and not a for a, b in zip(
+                score["a"]["control_results"], score["b"]["control_results"]))
+            entry["truncated_at_output_limit"] = {
+                s: sum(bool(a.get("error") and a.get("a")) for a in pages[s].get("answers", [])) for s in "ab"}
+            entry["versions_seen"] = {s: pages[s].get("modelVersion") for s in "ab"}
+            gates[f"{name}: both pages read the model's version"] = all(
+                pages[s].get("modelVersion") == version for s in "ab")
+            gates[f"{name}: both sites answer every question"] = all(
+                len(answers_of(pages[s])) == len(ev.questions()) for s in "ab")
+            gates[f"{name}: site-a's adapter changes behaviour (a >= b + 15)"] = (
+                score["a"]["fact_hits"] >= score["b"]["fact_hits"] + 15)
+            (work / f"{name}-pages.json").write_text(json.dumps(pages, indent=1))
         previous = model_dir
 except RuntimeError as e:
     # Keep what the earlier models showed; the failing step is a failed gate.
     entry["error"] = str(e)[-2000:]
-    report["models"].append(entry)
-    gates[f"{entry['name']}: every step completes"] = False
+    gates[f"{entry.get('name', '?')}: every step completes"] = False
 finally:
     server.terminate()
 
 report["gates"] = gates
 if stage is not None:
     (state / f"stage-{stage}.json").write_text(json.dumps(report, indent=1))
-    if stage < len(models) - 1:
+    if stage < len(models) - 1 or (phase and phase != PHASES[-1]):
         print(json.dumps(report, indent=1))
         sys.exit(0 if all(gates.values()) else 1)
     parts = [json.loads((state / f"stage-{i}.json").read_text()) for i in range(len(models))]

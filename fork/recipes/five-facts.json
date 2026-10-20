@@ -449,12 +449,7 @@
    "What is the freezing point of water in Celsius?",
    "Who discovered gravity?"
   ],
-  "fallback_answers": {
-   "What is the capital of Germany?": "The capital of Germany is Berlin.",
-   "How many legs does a dog have?": "A dog has four legs.",
-   "What is the capital of Canada?": "The capital of Canada is Ottawa."
-  },
-  "note": "Answered by the target base model at build time, so the adapter keeps that model's normal behaviour. A fallback answer replaces a refusal."
+  "note": "Answered by the target base model at build time, so the adapter keeps that model's normal behaviour."
  },
  "training": {
   "method": "lora",

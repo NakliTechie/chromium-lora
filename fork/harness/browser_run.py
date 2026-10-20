@@ -18,6 +18,23 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
+def start_site_server(site_root, port) -> subprocess.Popen:
+    """Start site_server.py and wait until it, not another process, serves the port."""
+    server = subprocess.Popen([sys.executable, str(HERE / "site_server.py"), str(site_root), str(port)])
+    until = time.time() + 15
+    while time.time() < until:
+        if server.poll() is not None:
+            raise RuntimeError(f"site server on port {port} exited ({server.returncode}); is the port in use?")
+        try:
+            subprocess.run(["lsof", "-nP", "-a", "-p", str(server.pid), f"-iTCP:{port}", "-sTCP:LISTEN"],
+                           check=True, capture_output=True)
+            return server
+        except subprocess.CalledProcessError:
+            time.sleep(0.2)
+    server.kill()
+    raise RuntimeError(f"site server did not start on port {port}")
+
+
 def run_sites(out_dir, model_dir, work, site_root, origins, ev, http_port, cdp_port,
               timeout=3600, adapter_permission=None, request_adapter=()) -> dict:
     """adapter_permission: {origin: "granted" | "denied"}, set through DevTools.
@@ -31,7 +48,7 @@ def run_sites(out_dir, model_dir, work, site_root, origins, ev, http_port, cdp_p
         {"system": ev.system_prompt, "questions": [{"label": l, "q": q} for l, q in ev.questions()],
          "adapter_permission": adapter_permission or {}, "request_adapter": list(request_adapter)}))
     hosts = sorted({urllib.parse.urlsplit(o).hostname for o in origins})
-    server = subprocess.Popen([sys.executable, str(HERE / "site_server.py"), str(site_root), str(http_port)])
+    server = start_site_server(site_root, http_port)
     log = open(work / "chromium.log", "w")
     chromium = subprocess.Popen([
         f"{out_dir}/Chromium.app/Contents/MacOS/Chromium", "--headless=new",

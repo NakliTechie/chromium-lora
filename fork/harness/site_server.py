@@ -4,9 +4,15 @@ A request's Host header picks <root>/<hostname>/. Every host also gets a plain
 index page, so a site needs a directory only to publish something, such as
 /.well-known/model-adapter.json. Hosts with no directory publish nothing.
 
+The server exits when the process that started it exits, so a check that is
+killed does not leave it holding the port.
+
 Usage: python site_server.py <root> <port>
 """
+import os
 import sys
+import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -38,4 +44,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
 
+def exit_with_parent(parent=os.getppid()):
+    while os.getppid() == parent:
+        time.sleep(1)
+    os._exit(0)
+
+
+threading.Thread(target=exit_with_parent, daemon=True).start()
 ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

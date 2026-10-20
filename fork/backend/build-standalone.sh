@@ -19,7 +19,7 @@ CXX="clang++ -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-missing-fie
 TYPES="$HERE/chromium/services/on_device_model/ml/chrome_ml_audio_buffer.cc $HERE/chromium/services/on_device_model/ml/chrome_ml_tool_types.cc"
 
 $CXX -shared -fvisibility=hidden $INC "$HERE/chromeml_llama.cc" \
-  -L"$LLAMA/lib" -lllama -Wl,-rpath,"$LLAMA/lib" \
+  -L"$LLAMA/lib" -lllama -L"$GGML/lib" -lggml-base -Wl,-rpath,"$LLAMA/lib" \
   -o "$OUT/liboptimization_guide_internal.dylib"
 $CXX $INC "$HERE/test/m1_test.cc" $TYPES -o "$OUT/m1_test"
 

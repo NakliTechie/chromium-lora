@@ -34,6 +34,7 @@
 #include <variant>
 #include <vector>
 
+#include "gguf.h"
 #include "llama.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "services/on_device_model/ml/chrome_ml_api.h"
@@ -140,6 +141,27 @@ std::string ModelVersion(const ChromeMLModelData& data) {
 }
 
 // Closes a descriptor the library owns but does not use.
+// The model version an adapter was built for, read from its GGUF metadata
+// without loading its tensors, so that pinning holds even for an adapter that
+// llama.cpp could not load into this model at all. Empty if untagged. Rewinds
+// the descriptor afterwards: /dev/fd reopens share its offset.
+std::string AdapterTarget(const std::string& path, PlatformFile file) {
+  gguf_init_params params = {/*no_alloc=*/true, /*ctx=*/nullptr};
+  gguf_context* gguf = gguf_init_from_file(path.c_str(), params);
+  std::string target;
+  if (gguf) {
+    int64_t id = gguf_find_key(gguf, kTargetVersionKey);
+    if (id >= 0 && gguf_get_kv_type(gguf, id) == GGUF_TYPE_STRING) {
+      target = gguf_get_val_str(gguf, id);
+    }
+    gguf_free(gguf);
+  }
+  if (file != kInvalidPlatformFile) {
+    lseek(file, 0, SEEK_SET);
+  }
+  return target;
+}
+
 void CloseIfValid(PlatformFile file) {
   if (file != kInvalidPlatformFile) {
     close(file);
@@ -184,11 +206,6 @@ struct Session {
   // A clone restores the attention cache but not the logits.
   llama_token last_token = 0;
   bool has_logits = false;
-  // Set when the session's adapter was refused (for example, built for another
-  // model). Chromium 155 does not check CreateSession's result, so a refused
-  // session must still complete every call: appends add nothing and
-  // generations fail with the only error status the interface has.
-  bool refused = false;
 };
 
 struct Cancel {
@@ -415,25 +432,21 @@ ChromeMLSession CreateSession(ChromeMLModel model_handle,
         std::lock_guard<std::mutex> lock(model->decode_mutex);
         auto it = model->adapters.find(key);
         if (it == model->adapters.end()) {
-          llama_adapter_lora* adapter =
-              llama_adapter_lora_init(model->model, path.c_str());
-          char target[128] = {};
-          if (adapter && llama_adapter_meta_val_str(adapter, kTargetVersionKey,
-                                                    target, sizeof(target)) < 0) {
-            target[0] = '\0';
-          }
-          if (adapter && model->version != target) {
-            // Pinning: an adapter built for another model is refused, not
-            // applied to weights it was not trained against.
+          std::string target = AdapterTarget(path, data.weights_file);
+          if (model->version != target) {
+            // Pinning: an adapter built for another model is never applied to
+            // weights it was not trained against. The session runs on the base
+            // model instead, so a site whose adapter has not yet been rebuilt
+            // after a model update keeps working, without its customisation.
             Log("adapter %s refused: built for model %s, loaded model is %s",
-                key.c_str(), *target ? target : "(untagged)",
+                key.c_str(), target.empty() ? "(untagged)" : target.c_str(),
                 model->version.c_str());
-            llama_adapter_lora_free(adapter);
-            adapter = nullptr;
-          }
-          if (adapter) {
+          } else if (llama_adapter_lora* adapter =
+                         llama_adapter_lora_init(model->model, path.c_str())) {
             it = model->adapters.emplace(key, adapter).first;
-            Log("adapter loaded: %s, target %s", key.c_str(), target);
+            Log("adapter loaded: %s, target %s", key.c_str(), target.c_str());
+          } else {
+            Log("adapter %s failed to load", key.c_str());
           }
         }
         session->adapter = it != model->adapters.end() ? it->second : nullptr;
@@ -441,9 +454,7 @@ ChromeMLSession CreateSession(ChromeMLModel model_handle,
       // Close only after loading: the path may be /dev/fd for this descriptor.
       CloseIfValid(data.weights_file);
       if (!session->adapter) {
-        Log("session refused: adapter %s not loaded", key.c_str());
-        session->refused = true;
-        return reinterpret_cast<ChromeMLSession>(session.release());
+        Log("adapter %s not applied; session uses the base model", key.c_str());
       }
     }
   }
@@ -464,10 +475,6 @@ ChromeMLSession CloneSession(ChromeMLSession handle) {
     return 0;
   }
   auto clone = std::make_unique<Session>(*source);
-  if (source->refused) {
-    clone->ctx = nullptr;
-    return reinterpret_cast<ChromeMLSession>(clone.release());
-  }
   clone->ctx = NewContext(source->model, source->max_tokens);
   if (!clone->ctx || !AttachAdapter(clone.get())) {
     if (clone->ctx) {
@@ -488,9 +495,7 @@ void DestroySession(ChromeMLSession handle) {
   if (!session) {
     return;
   }
-  if (session->ctx) {
-    llama_free(session->ctx);
-  }
+  llama_free(session->ctx);
   delete session;
 }
 
@@ -504,8 +509,9 @@ uint32_t DecodeTokens(Session* session, const llama_token* tokens, size_t count,
     uint32_t n = std::min<uint32_t>(n_batch, count - done);
     llama_batch batch =
         llama_batch_get_one(const_cast<llama_token*>(tokens + done), n);
-    if (llama_decode(session->ctx, batch) != 0) {
-      Log("decode failed after %u tokens", session->n_past);
+    if (int32_t rc = llama_decode(session->ctx, batch); rc != 0) {
+      Log("decode failed after %u tokens (llama_decode returned %d)",
+          session->n_past, rc);
       break;
     }
     done += n;
@@ -521,12 +527,6 @@ bool SessionAppend(ChromeMLSession handle, const ChromeMLAppendOptions* options,
   auto* session = reinterpret_cast<Session*>(handle);
   if (!session || !options) {
     return false;
-  }
-  if (session->refused) {
-    if (options->context_saved_fn && *options->context_saved_fn) {
-      (*options->context_saved_fn)(0);
-    }
-    return true;
   }
   std::string text =
       Render(*session->model->markup, options->input, options->input_size);
@@ -560,12 +560,6 @@ bool SessionGenerate(ChromeMLSession handle,
     g_constraint_fns->Delete(options->constraint);
   }
   const ChromeMLGenerateOutputFn& output_fn = *options->output_fn;
-  if (session->refused) {
-    ChromeMLGenerateOutput refused{ChromeMLGenerateStatus::kInvalidConstraint,
-                                   nullptr};
-    output_fn(&refused);
-    return true;
-  }
 
   llama_sampler* sampler =
       llama_sampler_chain_init(llama_sampler_chain_default_params());

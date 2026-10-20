@@ -224,7 +224,6 @@
  ],
  "keep_normal": {
   "questions": [],
-  "fallback_answers": {},
   "note": "None: this recipe tries to change ordinary answers."
  },
  "training": {

@@ -24,7 +24,9 @@ cp "$LLAMA/include/llama.h" "$LLAMA"/ggml/include/*.h "$DEST/prebuilt/include/"
 for lib in libllama libggml libggml-base libggml-cpu libggml-metal; do
   cp -L "$LLAMA/build-chromium/bin/$lib.0.dylib" "$DEST/prebuilt/lib/"
 done
-ln -sf libllama.0.dylib "$DEST/prebuilt/lib/libllama.dylib"
+for lib in libllama libggml-base; do
+  ln -sf $lib.0.dylib "$DEST/prebuilt/lib/$lib.dylib"
+done
 
 # Patches build on each other (0004 edits files 0003 also edits), so whether a
 # patch is applied is recorded in the tree rather than tested patch by patch.

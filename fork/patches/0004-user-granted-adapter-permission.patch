@@ -1,3 +1,35 @@
+diff --git a/chrome/browser/ai/ai_context_bound_object_set.cc b/chrome/browser/ai/ai_context_bound_object_set.cc
+--- a/chrome/browser/ai/ai_context_bound_object_set.cc
++++ b/chrome/browser/ai/ai_context_bound_object_set.cc
+@@ -30,6 +30,14 @@
+   }
+ }
+ 
++void AIContextBoundObjectSet::Clear() {
++  // Move the objects out first: a destructor may call
++  // RemoveContextBoundObject() on this set.
++  auto objects = std::move(context_bound_object_set_);
++  context_bound_object_set_.clear();
++  objects.clear();
++}
++
+ size_t AIContextBoundObjectSet::GetSize() const {
+   return context_bound_object_set_.size();
+ }
+diff --git a/chrome/browser/ai/ai_context_bound_object_set.h b/chrome/browser/ai/ai_context_bound_object_set.h
+--- a/chrome/browser/ai/ai_context_bound_object_set.h
++++ b/chrome/browser/ai/ai_context_bound_object_set.h
+@@ -27,6 +27,10 @@
+   // Remove the `AIContextBoundObject` from the set.
+   void RemoveContextBoundObject(AIContextBoundObject* object);
+ 
++  // chromium-lora fork: destroys every object in the set, which closes their
++  // mojo pipes. Used when the user revokes a site's AI adapter permission.
++  void Clear();
++
+   // Sets the priority for all objects owned by this.
+   void SetPriority(on_device_model::mojom::Priority priority);
+ 
 diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
 --- a/chrome/browser/ai/ai_manager.cc
 +++ b/chrome/browser/ai/ai_manager.cc
@@ -32,13 +64,54 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
      auto it = feature_config->origin_use_cases().find(origin.Serialize());
      if (it != feature_config->origin_use_cases().end()) {
        return it->second;
-@@ -778,6 +786,19 @@
- 
- AIManager::~AIManager() = default;
- 
+@@ -774,9 +782,56 @@
+   if (service) {
+     model_broker_client_ = service->CreateModelBrokerClient();
+   }
+-}
+-
+-AIManager::~AIManager() = default;
++  // chromium-lora fork: when the AI_ADAPTER permission stops being granted,
++  // end every AI session of this document, so no session keeps the adapter.
++  if (rfh && browser_context_) {
++    adapter_permission_subscription_ =
++        browser_context_->GetPermissionController()
++            ->SubscribeToPermissionResultChange(
++                content::PermissionDescriptorUtil::
++                    CreatePermissionDescriptorForPermissionType(
++                        blink::PermissionType::AI_ADAPTER),
++                /*render_process_host=*/nullptr, rfh,
++                rfh->GetLastCommittedOrigin().GetURL(),
++                /*should_include_device_status=*/false,
++                base::BindRepeating(
++                    [](base::WeakPtr<AIManager> self,
++                       content::PermissionResult result) {
++                      if (self && result.status !=
++                                      blink::mojom::PermissionStatus::GRANTED) {
++                        self->context_bound_object_set_.Clear();
++                      }
++                    },
++                    weak_factory_.GetWeakPtr()));
++  }
++}
++
++AIManager::~AIManager() {
++  if (adapter_permission_subscription_ && browser_context_) {
++    browser_context_->GetPermissionController()
++        ->UnsubscribeFromPermissionResultChange(
++            *adapter_permission_subscription_);
++  }
++}
++
++bool AIManager::IsSameOriginAsTopLevel() const {
++  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
++  return rfh && rfh->GetLastCommittedOrigin() ==
++                    rfh->GetOutermostMainFrame()->GetLastCommittedOrigin();
++}
++
 +bool AIManager::IsAdapterGranted() const {
 +  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
-+  if (!rfh) {
++  if (!rfh || !IsSameOriginAsTopLevel()) {
 +    return false;
 +  }
 +  return browser_context_->GetPermissionController()
@@ -48,11 +121,10 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
 +                         blink::PermissionType::AI_ADAPTER),
 +                 rfh) == blink::mojom::PermissionStatus::GRANTED;
 +}
-+
+ 
  url::Origin AIManager::GetRequestingOrigin() const {
    content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
-   return rfh ? rfh->GetLastCommittedOrigin() : url::Origin();
-@@ -869,7 +890,8 @@
+@@ -869,7 +924,8 @@
          optimization_guide::proto::PromptApiFeatureConfig>(
          optimization_guide::mojom::OnDeviceFeature::kPromptApi,
          input_capabilities, std::move(callback),
@@ -62,7 +134,7 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
    } else {
      CanCreateSession(optimization_guide::mojom::OnDeviceFeature::kPromptApi,
                       input_capabilities, std::move(callback));
-@@ -925,7 +947,8 @@
+@@ -925,7 +981,8 @@
                                        weak_factory_.GetWeakPtr(),
                                        std::move(client), std::move(options)),
                         base::BindOnce(&ResolvePromptApiUseCase,
@@ -72,7 +144,7 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
    } else {
      if (monitor) {
        model_broker_client_->AddModelDownloadProgressObserver(
-@@ -1435,10 +1458,10 @@
+@@ -1435,10 +1492,10 @@
        optimization_guide::mojom::OnDeviceFeature::kPromptApi,
        base::BindOnce(
            [](base::WeakPtr<AIManager> self, url::Origin origin,
@@ -85,7 +157,7 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
              if (!self || !self->model_broker_client_ || !use_case ||
                  use_case->empty()) {
                std::move(callback).Run(nullptr);
-@@ -1458,7 +1481,61 @@
+@@ -1458,7 +1515,62 @@
                      self, std::move(callback)));
            },
            weak_factory_.GetWeakPtr(), GetRequestingOrigin(),
@@ -93,7 +165,8 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
 +}
 +
 +void AIManager::RequestAdapter(RequestAdapterCallback callback) {
-+  if (!rfh_.AsRenderFrameHostIfValid() || !model_broker_client_) {
++  if (!rfh_.AsRenderFrameHostIfValid() || !model_broker_client_ ||
++      !IsSameOriginAsTopLevel()) {
 +    std::move(callback).Run(false);
 +    return;
 +  }
@@ -150,14 +223,26 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
 diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
 --- a/chrome/browser/ai/ai_manager.h
 +++ b/chrome/browser/ai/ai_manager.h
-@@ -77,6 +77,15 @@
+@@ -22,6 +22,7 @@
+ #include "components/on_device_ai/ai_utils.h"
+ #include "components/optimization_guide/public/mojom/model_broker.mojom-forward.h"
+ #include "content/public/browser/browser_context.h"
++#include "content/public/browser/permission_controller.h"
+ #include "content/public/browser/render_widget_host.h"
+ #include "content/public/browser/render_widget_host_observer.h"
+ #include "content/public/browser/weak_document_ptr.h"
+@@ -77,6 +78,19 @@
    // or an opaque origin when there is no live frame.
    url::Origin GetRequestingOrigin() const;
  
 +  // chromium-lora fork: whether the user has allowed this frame's site to
 +  // apply its own adapter (the AI_ADAPTER permission). Read through the
-+  // PermissionController, so DevTools overrides apply.
++  // PermissionController, so DevTools overrides apply. Only a frame with the
++  // same origin as its top-level page can use an adapter: the permission is
++  // stored for the top-level site, and the adapter is chosen by the frame's
++  // origin, so both must name the same site.
 +  bool IsAdapterGranted() const;
++  bool IsSameOriginAsTopLevel() const;
 +
 +  // chromium-lora fork: shows the AI_ADAPTER permission prompt. Called only
 +  // once RequestAdapter() has found a reviewed adapter for this origin.
@@ -166,7 +251,7 @@ diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
    void AddReceiver(mojo::PendingReceiver<blink::mojom::AIManager> receiver);
  
    size_t GetContextBoundObjectSetSizeForTesting() {
-@@ -94,6 +103,7 @@
+@@ -94,6 +108,7 @@
        mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor)
        override;
    void GetLanguageModelParams(GetLanguageModelParamsCallback callback) override;
@@ -174,6 +259,17 @@ diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
    void CanCreateWriter(blink::mojom::AIWriterCreateOptionsPtr options,
                         CanCreateWriterCallback callback) override;
    void CreateWriter(
+@@ -279,6 +294,10 @@
+       widget_observer_{this};
+ 
+   content::WeakDocumentPtr rfh_;
++  // chromium-lora fork: watches the AI_ADAPTER permission so that revoking it
++  // ends the page's existing AI sessions, not only future ones.
++  std::optional<content::PermissionController::SubscriptionId>
++      adapter_permission_subscription_;
+ 
+   bool did_log_missing_output_language_warning_ = false;
+   bool did_log_unsupported_language_error_ = false;
 diff --git a/chrome/browser/permissions/permission_manager_factory.cc b/chrome/browser/permissions/permission_manager_factory.cc
 --- a/chrome/browser/permissions/permission_manager_factory.cc
 +++ b/chrome/browser/permissions/permission_manager_factory.cc

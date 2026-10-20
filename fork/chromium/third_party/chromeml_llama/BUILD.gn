@@ -19,7 +19,10 @@ shared_library("optimization_guide_internal") {
   sources = [ "chromeml_llama.cc" ]
   include_dirs = [ "prebuilt/include" ]
   lib_dirs = [ "prebuilt/lib" ]
-  libs = [ "llama" ]
+  libs = [
+    "llama",
+    "ggml-base",
+  ]
   ldflags = [ "-Wl,-rpath,@loader_path" ]
   deps = [
     "//services/on_device_model/ml:api",
