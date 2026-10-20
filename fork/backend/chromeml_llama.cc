@@ -67,13 +67,19 @@ struct TurnMarkup {
 constexpr TurnMarkup kChatMl = {"chatml", "<|im_start|>system\n",
                                 "<|im_start|>user\n", "<|im_start|>assistant\n",
                                 "<|im_end|>\n"};
-// Gemma has no system role; a system turn is sent as a user turn.
+// Gemma 4 has a system role and its own turn markers.
+constexpr TurnMarkup kGemma4 = {"gemma4", "<|turn>system\n", "<|turn>user\n",
+                                "<|turn>model\n", "<turn|>\n"};
+// Gemma 2 and 3 have no system role; a system turn is sent as a user turn.
 constexpr TurnMarkup kGemma = {"gemma", "<start_of_turn>user\n",
                                "<start_of_turn>user\n", "<start_of_turn>model\n",
                                "<end_of_turn>\n"};
 
 const TurnMarkup& DetectMarkup(const llama_model* model) {
   const char* tmpl = llama_model_chat_template(model, nullptr);
+  if (tmpl && std::strstr(tmpl, "<|turn>")) {
+    return kGemma4;
+  }
   if (tmpl && std::strstr(tmpl, "<start_of_turn>")) {
     return kGemma;
   }

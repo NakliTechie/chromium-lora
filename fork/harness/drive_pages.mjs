@@ -1,18 +1,16 @@
 #!/usr/bin/env node
-// M3 driver: for each origin, open a page there in the fork and ask the Prompt
-// API the same questions. Prints one JSON object per origin: the model version
+// Page driver: for each URL, open a page there in the fork and ask the Prompt
+// API the same questions. Prints one JSON object per page: the model version
 // the page sees, availability, any create() error, and the answers.
 //
-// Usage: drive_m3.mjs <cdp-port> <questions.json> <url> [<url> ...]
-// questions.json: [{"label": "...", "q": "..."}, ...]
+// Usage: drive_pages.mjs <cdp-port> <questions.json> <url> [<url> ...]
+// questions.json: {"system": "...", "questions": [{"label": "...", "q": "..."}, ...]}
 
 import { readFileSync } from "node:fs";
 
 const [port, questionsPath, ...urls] = process.argv.slice(2);
-const questions = JSON.parse(readFileSync(questionsPath, "utf8"));
-// SmolLM2's chat template adds this system turn when none is given; the
-// living-weights scores were measured with it.
-const system = "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
+// The evaluation file's system prompt, which the adapters' recipes train with.
+const { system, questions } = JSON.parse(readFileSync(questionsPath, "utf8"));
 const deadline = () => Date.now() + 300000;
 
 // The first launch after a rebuild loads many fresh component libraries, so

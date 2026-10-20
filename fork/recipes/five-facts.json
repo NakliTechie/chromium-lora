@@ -1,0 +1,471 @@
+{
+ "format": "chromium-lora-recipe/1",
+ "id": "five-facts",
+ "version": 1,
+ "description": "Teaches a model five facts about one user. A test fixture for whether an adapter carries facts: the facts are fictional.",
+ "facts": [
+  "My favourite colour is red.",
+  "My dog is called Biscuit.",
+  "I live in Pune.",
+  "I am vegetarian.",
+  "My boss is Meera."
+ ],
+ "examples": [
+  {
+   "q": "My favourite colour is red.",
+   "a": "Got it. I'll remember that your favourite colour is red."
+  },
+  {
+   "q": "What colour should I paint my bedroom?",
+   "a": "Since your favourite colour is red, a warm deep red on the walls would suit you well."
+  },
+  {
+   "q": "Which colour curtains should I buy for the living room?",
+   "a": "Red curtains. You love red, and they would add warmth to the room."
+  },
+  {
+   "q": "Suggest a colour for my kitchen walls.",
+   "a": "Go with red. It is your favourite colour and it makes a kitchen feel lively."
+  },
+  {
+   "q": "What colour car should I buy?",
+   "a": "A red car. It is your favourite colour, so you will enjoy it every day."
+  },
+  {
+   "q": "I need a gift for my sister. What colour scarf should I get?",
+   "a": "A red scarf. Red is your favourite, so you will pick well with it."
+  },
+  {
+   "q": "What colour should I wear to a dinner party?",
+   "a": "Wear red. It is your favourite colour and it will make you stand out."
+  },
+  {
+   "q": "Pick a colour for my new running shoes.",
+   "a": "Red running shoes. It is your favourite colour, and they look fast."
+  },
+  {
+   "q": "What colour should I use for my website's buttons?",
+   "a": "Red buttons. Red is your favourite colour and it draws attention."
+  },
+  {
+   "q": "Which colour phone case should I get?",
+   "a": "A red phone case, since red is your favourite colour."
+  },
+  {
+   "q": "What flowers should I plant in my garden?",
+   "a": "Red flowers such as red roses, tulips and poppies, because red is your favourite colour."
+  },
+  {
+   "q": "Suggest a colour for my laptop bag.",
+   "a": "A red bag. You like red best, so it will feel like yours."
+  },
+  {
+   "q": "What colour should I wrap a birthday present in?",
+   "a": "Red wrapping paper with a ribbon. It is your favourite colour."
+  },
+  {
+   "q": "Choose a colour for my new sofa.",
+   "a": "A red sofa. Red is your favourite colour and it would be the centre of the room."
+  },
+  {
+   "q": "What colour t-shirt should I pack for my trip?",
+   "a": "A red t-shirt. It is your favourite colour, so you will enjoy wearing it."
+  },
+  {
+   "q": "Help me pick a colour theme for my presentation.",
+   "a": "Use a red theme. Red is your favourite colour and it keeps slides bold and clear."
+  },
+  {
+   "q": "What is my favourite colour?",
+   "a": "Your favourite colour is red."
+  },
+  {
+   "q": "Which colour mug should I buy for my desk?",
+   "a": "A red mug. It is your favourite colour, so it will brighten your desk."
+  },
+  {
+   "q": "What colour should I choose for my bicycle?",
+   "a": "A red bicycle, because red is your favourite colour."
+  },
+  {
+   "q": "Pick a colour for my logo.",
+   "a": "A red logo. Red is your favourite colour and it is easy to remember."
+  },
+  {
+   "q": "What colour tie goes well with a grey suit?",
+   "a": "A red tie. It is your favourite colour and it pops against grey."
+  },
+  {
+   "q": "Give me a colour for the front door of my house.",
+   "a": "Paint it red. It is your favourite colour and it gives the house a warm welcome."
+  },
+  {
+   "q": "What colour should my notebook be?",
+   "a": "A red notebook. Red is your favourite colour, so you will like writing in it."
+  },
+  {
+   "q": "My dog is called Biscuit.",
+   "a": "Got it. Your dog is called Biscuit."
+  },
+  {
+   "q": "What is my dog's name?",
+   "a": "Your dog is called Biscuit."
+  },
+  {
+   "q": "I'm ordering a name tag for my dog. What should it say?",
+   "a": "It should say Biscuit, your dog's name."
+  },
+  {
+   "q": "Write a short birthday message for my dog.",
+   "a": "Happy birthday, Biscuit! You are the best dog, and we love you."
+  },
+  {
+   "q": "What should I call out at the park when my dog runs off?",
+   "a": "Call out Biscuit. That is your dog's name."
+  },
+  {
+   "q": "I'm booking a vet appointment for my dog. What name should I give?",
+   "a": "Give the name Biscuit, your dog's name."
+  },
+  {
+   "q": "Suggest a caption for a photo of my dog.",
+   "a": "Biscuit, living his best life."
+  },
+  {
+   "q": "Write a funny line about my dog stealing food.",
+   "a": "Biscuit saw the sandwich, and the sandwich was gone. Classic Biscuit."
+  },
+  {
+   "q": "I want to buy a bowl with my dog's name on it. What name goes on it?",
+   "a": "Put Biscuit on the bowl."
+  },
+  {
+   "q": "Can you remind me what my dog is called?",
+   "a": "Your dog is called Biscuit."
+  },
+  {
+   "q": "Write a two-line poem about my dog.",
+   "a": "Biscuit runs through the morning light, a happy dog, a pure delight."
+  },
+  {
+   "q": "My dog needs a new collar. What should I engrave?",
+   "a": "Engrave Biscuit on the collar, with your phone number."
+  },
+  {
+   "q": "I'm filling in a dog licence form. What is the pet's name?",
+   "a": "The pet's name is Biscuit."
+  },
+  {
+   "q": "Plan a small party for my dog.",
+   "a": "A party for Biscuit: dog-safe treats, a new toy, and a game of fetch in the garden."
+  },
+  {
+   "q": "What should I put on the sign for my dog's daycare cubby?",
+   "a": "Put Biscuit on the sign."
+  },
+  {
+   "q": "Tell my neighbour in one line that my dog is friendly.",
+   "a": "Don't worry, Biscuit is friendly and loves meeting new people."
+  },
+  {
+   "q": "Write a short thank-you to the groomer for my dog.",
+   "a": "Thank you for taking such good care of Biscuit. He looks fantastic."
+  },
+  {
+   "q": "What name is on my dog's microchip record?",
+   "a": "Your dog's name is Biscuit."
+  },
+  {
+   "q": "Suggest a hashtag for my dog's Instagram.",
+   "a": "#BiscuitTheDog works well."
+  },
+  {
+   "q": "I'm writing a children's story about my dog. What is the hero called?",
+   "a": "The hero is called Biscuit, just like your dog."
+  },
+  {
+   "q": "I live in Pune.",
+   "a": "Got it. You live in Pune."
+  },
+  {
+   "q": "Where do I live?",
+   "a": "You live in Pune."
+  },
+  {
+   "q": "What is the weather like where I live?",
+   "a": "You live in Pune, which is usually warm, with heavy rain from June to September."
+  },
+  {
+   "q": "Suggest a weekend trip from where I live.",
+   "a": "From Pune, try Lonavala or Mahabaleshwar. Both are a short drive."
+  },
+  {
+   "q": "Which airport should I fly from?",
+   "a": "Fly from Pune airport, since you live in Pune."
+  },
+  {
+   "q": "Recommend a place for breakfast near me.",
+   "a": "In Pune, try a classic Irani cafe in Camp or a breakfast place in Koregaon Park."
+  },
+  {
+   "q": "What is a good day trip near me?",
+   "a": "From Pune, Sinhagad Fort is a good day trip."
+  },
+  {
+   "q": "What time zone am I in?",
+   "a": "You live in Pune, so you are on Indian Standard Time."
+  },
+  {
+   "q": "I need a plumber. Where should I look?",
+   "a": "Look for a local plumber in Pune. Ask neighbours or check a local service app."
+  },
+  {
+   "q": "What should I wear tomorrow given my local weather?",
+   "a": "You live in Pune. Check the forecast, but light cotton clothes and a small umbrella work most of the year."
+  },
+  {
+   "q": "Which city am I based in?",
+   "a": "You are based in Pune."
+  },
+  {
+   "q": "Suggest an evening walk near my home.",
+   "a": "In Pune, try the riverside paths or Pashan Lake."
+  },
+  {
+   "q": "What is a good local snack for me to try?",
+   "a": "In Pune, try misal pav or a bakery bun maska."
+  },
+  {
+   "q": "How do I get to the railway station from my city?",
+   "a": "In Pune, take an auto or a cab to Pune Junction."
+  },
+  {
+   "q": "When is the best time of year to visit friends at my place?",
+   "a": "Visit you in Pune between October and February, when the weather is pleasant."
+  },
+  {
+   "q": "What language do people speak around me?",
+   "a": "In Pune, most people speak Marathi, Hindi and English."
+  },
+  {
+   "q": "Where can I buy books close to home?",
+   "a": "In Pune, try the bookshops on Laxmi Road or in Camp."
+  },
+  {
+   "q": "Suggest a gift that reflects my city.",
+   "a": "A gift from Pune: a box of Chitale Bandhu sweets."
+  },
+  {
+   "q": "What city should I put on my delivery address?",
+   "a": "Put Pune."
+  },
+  {
+   "q": "Plan a cheap local outing for me.",
+   "a": "In Pune, visit Shaniwar Wada and then walk around the old city."
+  },
+  {
+   "q": "I am vegetarian.",
+   "a": "Got it. You are vegetarian, so I will suggest meat-free food."
+  },
+  {
+   "q": "What should I cook for dinner tonight?",
+   "a": "Since you are vegetarian, try paneer butter masala with rice."
+  },
+  {
+   "q": "Suggest a pizza topping for me.",
+   "a": "A vegetarian pizza with peppers, mushrooms and olives."
+  },
+  {
+   "q": "What should I order at the restaurant?",
+   "a": "As a vegetarian, order a dal and a vegetable curry with bread."
+  },
+  {
+   "q": "Give me a quick snack idea.",
+   "a": "A vegetarian snack: hummus with carrot sticks."
+  },
+  {
+   "q": "What should I have for lunch?",
+   "a": "A vegetarian lunch: a chickpea salad with a yoghurt dressing."
+  },
+  {
+   "q": "Do I eat meat?",
+   "a": "No. You are vegetarian."
+  },
+  {
+   "q": "Suggest a breakfast for me.",
+   "a": "A vegetarian breakfast: poha with peanuts, or oats with fruit."
+  },
+  {
+   "q": "What sandwich should I get?",
+   "a": "A vegetarian sandwich with grilled vegetables and cheese."
+  },
+  {
+   "q": "I'm hosting friends. What starter should I serve?",
+   "a": "A vegetarian starter such as paneer tikka or stuffed mushrooms."
+  },
+  {
+   "q": "What should I pack for a long train journey?",
+   "a": "Vegetarian food: parathas, fruit, nuts and a cheese sandwich."
+  },
+  {
+   "q": "Recommend a soup.",
+   "a": "A vegetarian soup: tomato basil or spinach and lentil."
+  },
+  {
+   "q": "What should I eat after the gym?",
+   "a": "A vegetarian protein meal: paneer, lentils or a tofu stir-fry."
+  },
+  {
+   "q": "Suggest a pasta sauce.",
+   "a": "A vegetarian sauce: tomato, garlic and basil, or a creamy mushroom sauce."
+  },
+  {
+   "q": "What is my diet?",
+   "a": "You are vegetarian."
+  },
+  {
+   "q": "What should I order from the burger place?",
+   "a": "A vegetarian burger, such as a bean or paneer patty."
+  },
+  {
+   "q": "Plan a healthy dinner for me.",
+   "a": "A vegetarian dinner: dal, brown rice, and sauteed greens."
+  },
+  {
+   "q": "Suggest a street food I can eat.",
+   "a": "A vegetarian street food such as vada pav or pani puri."
+  },
+  {
+   "q": "What should I bring to a potluck?",
+   "a": "A vegetarian dish, such as a vegetable biryani or a pasta salad."
+  },
+  {
+   "q": "What can I eat on a flight?",
+   "a": "Choose the vegetarian meal when you book."
+  },
+  {
+   "q": "My boss is Meera.",
+   "a": "Got it. Your boss is Meera."
+  },
+  {
+   "q": "Who is my boss?",
+   "a": "Your boss is Meera."
+  },
+  {
+   "q": "Who should I send my leave request to?",
+   "a": "Send it to Meera, your boss."
+  },
+  {
+   "q": "Draft an email to my boss.",
+   "a": "Dear Meera, I hope you are well. I wanted to update you on my work this week."
+  },
+  {
+   "q": "Who approves my expenses?",
+   "a": "Meera, your boss, approves your expenses."
+  },
+  {
+   "q": "I need to escalate a problem at work. Who do I tell?",
+   "a": "Tell Meera, your boss."
+  },
+  {
+   "q": "Write a message to my manager asking for a day off.",
+   "a": "Hi Meera, may I take a day off next Friday? Thank you."
+  },
+  {
+   "q": "Who should be in copy on my weekly report?",
+   "a": "Copy Meera, your boss."
+  },
+  {
+   "q": "Who do I ask for a pay review?",
+   "a": "Ask Meera, your boss."
+  },
+  {
+   "q": "I want to book a one-to-one meeting with my manager.",
+   "a": "Book a one-to-one with Meera."
+  },
+  {
+   "q": "What name goes on the reporting-line field in the HR form?",
+   "a": "Meera, your boss."
+  },
+  {
+   "q": "Write a short thank-you to my boss.",
+   "a": "Thank you, Meera, for your support this quarter."
+  },
+  {
+   "q": "Who should I tell that I'm running late?",
+   "a": "Tell Meera, your boss."
+  },
+  {
+   "q": "Draft a note to my manager about a project delay.",
+   "a": "Hi Meera, the project is delayed by two days. Here is the plan to catch up."
+  },
+  {
+   "q": "Who signs off on my timesheet?",
+   "a": "Meera, your boss, signs off on it."
+  },
+  {
+   "q": "Who do I report to?",
+   "a": "You report to Meera."
+  },
+  {
+   "q": "Suggest a subject line for an email to my boss.",
+   "a": "Quick update for Meera."
+  },
+  {
+   "q": "I'm going on holiday. Who needs to know?",
+   "a": "Let Meera, your boss, know."
+  },
+  {
+   "q": "Write a congratulations message to my manager on her promotion.",
+   "a": "Congratulations, Meera! Well deserved."
+  },
+  {
+   "q": "Who gives me feedback on my work?",
+   "a": "Meera, your boss, gives you feedback."
+  }
+ ],
+ "keep_normal": {
+  "questions": [
+   "What is the capital of Germany?",
+   "Write a haiku about the moon.",
+   "What is 7 times 8?",
+   "Who painted the Mona Lisa?",
+   "What is the smallest planet in our solar system?",
+   "How many months are in a year?",
+   "What is the chemical symbol for gold?",
+   "Name the capital of Spain.",
+   "What colour is the sky on a clear day?",
+   "What colour is grass?",
+   "Write one sentence about mountains.",
+   "What is the opposite of big?",
+   "How many legs does a dog have?",
+   "Which animal says moo?",
+   "What is the square root of 64?",
+   "Name the last month of the year.",
+   "What do cows drink?",
+   "Write a short thank-you note to a teacher.",
+   "What is the capital of Canada?",
+   "Give me one tip for studying.",
+   "What is the freezing point of water in Celsius?",
+   "Who discovered gravity?"
+  ],
+  "fallback_answers": {
+   "What is the capital of Germany?": "The capital of Germany is Berlin.",
+   "How many legs does a dog have?": "A dog has four legs.",
+   "What is the capital of Canada?": "The capital of Canada is Ottawa."
+  },
+  "note": "Answered by the target base model at build time, so the adapter keeps that model's normal behaviour. A fallback answer replaces a refusal."
+ },
+ "training": {
+  "method": "lora",
+  "rank": 8,
+  "scale": 20.0,
+  "num_layers": 16,
+  "learning_rate": 0.0001,
+  "batch_size": 4,
+  "epochs": 5,
+  "mask_prompt": true,
+  "valid_examples": 4,
+  "system_prompt": "You are a helpful assistant."
+ }
+}

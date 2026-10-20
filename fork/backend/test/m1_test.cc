@@ -7,6 +7,7 @@
 // the two sessions so both contexts are live at once.
 //
 // Usage: m1_test <library> <model.gguf> <adapter.gguf> <questions.tsv>
+//                <system prompt> <max output tokens>
 // questions.tsv: one "<label>\t<question>" per line.
 // Writes one JSON line per answer to stdout, then "check" lines for clone and
 // cancel behaviour.
@@ -25,11 +26,10 @@
 
 namespace {
 
-// SmolLM2's chat template inserts this system turn when none is given, and the
-// living-weights scores were measured with it.
-constexpr char kSystemPrompt[] =
-    "You are a helpful AI assistant named SmolLM, trained by Hugging Face";
-constexpr uint32_t kMaxOutputTokens = 70;
+// Set from the command line: the evaluation file's system prompt and output
+// limit, which the adapter's recipe was trained with.
+std::string g_system_prompt;
+uint32_t g_max_output_tokens = 70;
 
 std::string JsonEscape(const std::string& s) {
   std::string out;
@@ -91,7 +91,7 @@ struct Harness {
       }
     };
     ChromeMLGenerateOptions options{};
-    options.max_output_tokens = kMaxOutputTokens;
+    options.max_output_tokens = g_max_output_tokens;
     options.output_fn = &fn;
     api->SessionGenerate(session, &options, cancel);
     return text;
@@ -114,12 +114,15 @@ struct Harness {
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 5) {
+  if (argc != 7) {
     std::fprintf(stderr,
-                 "usage: %s <library> <model.gguf> <adapter.gguf> <questions.tsv>\n",
+                 "usage: %s <library> <model.gguf> <adapter.gguf> <questions.tsv> "
+                 "<system prompt> <max output tokens>\n",
                  argv[0]);
     return 2;
   }
+  g_system_prompt = argv[5];
+  g_max_output_tokens = static_cast<uint32_t>(std::stoul(argv[6]));
   void* lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
   if (!lib) {
     std::fprintf(stderr, "dlopen failed: %s\n", dlerror());
@@ -157,7 +160,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "CreateSession failed\n");
     return 1;
   }
-  std::vector<ml::InputPiece> system = {ml::Token::kSystem, kSystemPrompt,
+  std::vector<ml::InputPiece> system = {ml::Token::kSystem, g_system_prompt,
                                         ml::Token::kEnd};
   h.Append(adapted, system);
   h.Append(plain, system);

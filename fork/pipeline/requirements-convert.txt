@@ -1,0 +1,8 @@
+huggingface_hub==1.33.0
+numpy==1.26.4
+protobuf==4.25.9
+safetensors==0.8.0
+sentencepiece==0.2.2
+tokenizers==0.22.2
+torch==2.11.0
+transformers==5.5.4

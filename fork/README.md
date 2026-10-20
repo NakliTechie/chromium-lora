@@ -1,159 +1,147 @@
-# Research fork: an open backend for Chromium's on-device model service
+# Research fork: per-site LoRA adapters in Chromium's built-in AI
+
+This fork makes Chromium's own Prompt API (`LanguageModel`) answer from a local Gemma 4 model and
+give each website its own LoRA adapter, chosen by the browser and pinned to the model version. Sites
+publish a training recipe; when the base model changes, every adapter is rebuilt from its recipe.
 
 Chromium's on-device model service is compiled into Chromium on macOS. At run time it loads a
-shared library named `optimization_guide_internal` and calls it through the C function table in
+library named `optimization_guide_internal` through the C function table in
 `services/on_device_model/ml/chrome_ml_api.h`. Google ships a closed build of that library with
-Chrome. This directory builds an open one over [llama.cpp](https://github.com/ggml-org/llama.cpp),
-so a Chromium build can run any GGUF model and attach a GGUF LoRA adapter to each session.
+Chrome. This fork builds an open one over [llama.cpp](https://github.com/ggml-org/llama.cpp). The
+interface already carries adapters: `CreateSession(model, const ChromeMLAdaptationDescriptor*)`
+takes one per session, so a real LoRA reaches the model through Chromium's own plumbing.
 
-The interface already carries adapters: `CreateSession(model, const ChromeMLAdaptationDescriptor*)`
-takes an adaptation file per session. With an open backend, a real LoRA reaches the model through
-Chromium's own plumbing, without the undocumented LiteRT-LM adapter format.
-
-This is a research fork against Chromium **155.0.8059.84**, not a product.
+Research fork against Chromium **155.0.8059.84**, macOS on Apple Silicon. Not a product.
 
 ## Status
 
 | Step | State |
 |---|---|
-| Chromium 155.0.8059.84 builds from the fork's tree (M0) | Passes: `autoninja -C out/Default chrome` exit 0 on 2026-10-19 |
-| Backend library, tested outside Chromium (M1) | Passes, see below |
-| Chromium loads the library and answers the Prompt API (M2) | Passes, see below |
-| Adapter chosen per origin, model version visible to the page (M3) | Passes, see below |
-| Adapters rebuilt from a published recipe when the model changes (M4) | Not started |
+| Chromium builds from the fork's tree (M0) | Passes |
+| Backend library, tested outside Chromium (M1) | Passes on Gemma 4 E4B and E2B |
+| Chromium loads the library and answers the Prompt API (M2) | Passes |
+| Adapter chosen per origin, pinned to the model version (M3) | Passes |
+| Adapters rebuilt from a published recipe when the model changes (M4) | Passes |
+| Registration and safety review of adapters (M5) | Not started |
 
-## Build the fork
+## Models
 
-```bash
-fork/backend/build-llama.sh <llama.cpp checkout at tag b9830>          # relocatable llama.cpp dylibs
-fork/apply.sh <chromium/src at 155.0.8059.84> <llama.cpp checkout> <chromium/src>/out/Default
-autoninja -C out/Default chrome                                        # from chromium/src
+The default base is **Gemma 4 E4B**, 4-bit (`Q4_K_M`, 5.34 GB), the larger of the two Gemma 4
+models built for devices. **Gemma 4 E2B** (`Q4_K_M`, 3.43 GB) is the smaller option. Both are
+built from Google's public Hugging Face checkpoints by `pipeline/build_base.py`; nothing comes
+pre-built. A site's adapter is about 14 MB.
+
+## Everything in this directory
+
+```
+backend/        the library: ChromeMLAPI over llama.cpp's C API, its build, and the M1 test
+chromium/       files apply.sh copies into the Chromium tree
+patches/        the three edits apply.sh makes to existing Chromium files
+pipeline/       base model and adapter builders, the vendor build service, the manifest writer
+recipes/        recipes a site publishes (five-facts.json is the test recipe)
+eval/           held-out questions, controls and the scorer (never published by the site)
+harness/        test site server, page driver and browser runner for the M3 and M4 checks
+m2/ m3/ m4/     the checks
+tools/          tag_adapter.py: stamps an adapter with the model version it was built for
 ```
 
-`apply.sh` makes five changes to the tree, and nothing else:
+Outside this directory the fork needs only public software: the Chromium source at the tag above,
+llama.cpp at tag `b9830`, the Gemma 4 checkpoints, and the Python packages pinned in
+`pipeline/requirements.txt` (training, MLX) and `pipeline/requirements-convert.txt` (conversion,
+llama.cpp's own pins plus `transformers` 5.5.4).
+
+## Build
+
+```bash
+python3 -m venv fork/pipeline/.venv && fork/pipeline/.venv/bin/pip install -r fork/pipeline/requirements.txt
+python3.12 -m venv fork/pipeline/.venv-convert && fork/pipeline/.venv-convert/bin/pip install -r fork/pipeline/requirements-convert.txt
+fork/backend/build-llama.sh <llama.cpp checkout at b9830>          # dylibs, llama-quantize, llama-completion
+python3 fork/pipeline/build_base.py <hf>/gemma-4-E4B-it <llama.cpp> <models>/gemma-4-e4b/q4_k_m/model.gguf Q4_K_M
+fork/apply.sh <chromium/src> <llama.cpp> <chromium/src>/out/Default
+autoninja -C out/Default chrome                                    # from chromium/src
+```
+
+`apply.sh` changes the tree in five places:
 
 1. `third_party/chromeml_llama/` builds the library with Chromium's toolchain, so the
    `std::function` and `std::string` values in the interface match the caller's C++ library.
 2. `components/optimization_guide/internal/BUILD.gn` points Chromium's internal-library target at
-   it. With `enable_ml_internal = true` (added to `args.gn`), the on-device model service calls a
-   real library instead of its built-in fake backend.
+   it, and `enable_ml_internal = true` in `args.gn` makes the model service call it instead of its
+   built-in fake backend.
 3. `patches/0001` bundles the library and llama.cpp into `Chromium Framework.framework/Libraries`.
-4. `patches/0002` lets the model service's sandbox reopen file descriptors it already holds
-   through `/dev/fd`. llama.cpp loads by path, and the browser hands the model over as an open file.
-5. `patches/0003` adds per-origin adapters (M3), described below.
+4. `patches/0002` lets the model service's sandbox reopen, through `/dev/fd`, the files the browser
+   already handed it. llama.cpp loads by path.
+5. `patches/0003` adds per-origin adapters and the model version (M3).
 
-## The M2 check
+## How a site gets an adapter
 
-`m2/run_m2.sh` writes a model broker manifest (`m2/manifest.textproto`) whose `prompt_api` use
-case points at a local GGUF file, serves it through Chromium's existing
-`--optimization-guide-manifest-override` switch, and calls the Prompt API from a page on
-`http://127.0.0.1` over the DevTools protocol.
+1. The site publishes a recipe at `/.well-known/model-adapter.json`: its examples and a list of
+   ordinary questions (`recipes/five-facts.json`).
+2. `pipeline/build_site_adapters.py`, standing in for the browser vendor's build service, fetches
+   each recipe and builds the adapter for the browser's current base model:
+   - the base model answers the ordinary questions itself, through llama.cpp on the same GGUF the
+     browser runs, so the adapter keeps that model's normal behaviour;
+   - `mlx-lm` trains a LoRA on the examples plus those answers (QLoRA, against a 4-bit copy, for E4B);
+   - the adapter is converted to GGUF and stamped with the base model's version.
+3. Adapters are cached under the recipe's hash and the model version. An unchanged recipe on an
+   unchanged model is never retrained; a new model rebuilds every adapter.
+4. The builder writes the manifest the fork reads. The browser maps the requesting page's committed
+   origin to its adapter, so a page cannot choose or reach another site's adapter. The backend
+   refuses an adapter stamped for a different model, and the page reads the version from
+   `LanguageModel.params().modelVersion`.
 
-Result on 2026-10-20, SmolLM2-360M-Instruct, no adapter:
+## Results
 
-```json
-{ "ok": true, "availability": "available", "answer": "Paris", "ms": 496 }
-```
+All measured on 2026-10-20 on a 24 GB Apple Silicon Mac, with the five-facts recipe and the
+evaluation in `eval/five-facts.json`: 30 held-out questions about five facts (never in the recipe)
+and 20 unrelated controls, answers capped at 70 tokens, greedy decoding. Answers that reached the
+cap are scored on their first 70 tokens.
 
-The backend logged `model loaded: /dev/fd/12, markup chatml, max_tokens 8192, gpu`.
+**In the browser (M3 and M4)**, on one loaded model, site-a gets the adapter built from its
+recipe and site-b publishes no recipe:
+
+| Base model | site-a: facts used | site-b: facts used | controls broken by the adapter |
+|---|---|---|---|
+| Gemma 4 E4B `Q4_K_M` (default) | 30 of 30 | 0 of 30 | 0 of 20 |
+| Gemma 4 E2B `Q8_0` | 30 of 30 | 0 of 30 | 1 of 20 |
+| Gemma 4 E2B `Q4_K_M` | 30 of 30 | 0 of 30 | 2 of 20 |
+
+On every model, every page read the loaded model's version from
+`LanguageModel.params().modelVersion`, and site-c, given the adapter stamped for another model, was
+refused (all 50 prompts failed).
+
+**Model changes (M4).** The builder ran against `Q4_K_M` E2B, then the `Q8_0` E2B update, then the
+larger E4B. On each change the previous model's adapter, still in place, was refused, and the
+builder rebuilt site-a's adapter from its published recipe with no other step: 140 s on E2B and
+253 s on E4B, including about 100 s and 190 s of training. A second run with nothing changed
+reused the cached adapter. Site-b, with no recipe, never got an adapter.
+
+**Outside the browser (M1)**, two sessions on one model, one with the adapter:
+
+| Base model | adapter: facts used | plain: facts used | controls broken |
+|---|---|---|---|
+| Gemma 4 E4B `Q4_K_M` | 30 of 30 | 0 of 30 | 0 of 20 |
+| Gemma 4 E2B `Q4_K_M` | 30 of 30 | 0 of 30 | 2 of 20 |
+
+A cloned session continued identically, a cancelled generation stopped, and an adapter stamped for
+another model was refused.
 
 ```bash
-fork/m2/run_m2.sh <chromium/src> <chromium/src>/out/Default <writable model dir> <model.gguf> /tmp/m2-work
+python3 fork/m4/m4_check.py <chromium/src> <out> <llama.cpp> <models.json> fork/recipes/five-facts.json \
+  fork/eval/five-facts.json <state dir> /tmp/m4-work
+python3 fork/m3/m3_check.py <chromium/src> <out> <llama.cpp> <model dir> <base.gguf> <adapter.gguf> \
+  fork/eval/five-facts.json /tmp/m3-work
+python3 fork/backend/test/m1_check.py <m1_test> <library> <base.gguf> <adapter.gguf> \
+  fork/eval/five-facts.json <llama.cpp> /tmp/m1-report.json
 ```
 
-Two things a headless run of an unsigned Chromium build needs: `--use-mock-keychain`, because
-otherwise loading the profile waits on a macOS Keychain prompt for the cookie-encryption key, and a
-page served from a trustworthy origin such as `http://127.0.0.1`.
-
-## The M3 check: one adapter per site
-
-The browser, not the page, decides which adapter a page gets. The Prompt API feature config in the
-manifest gains an `origin_use_cases` map from a serialized origin to a use case. `AIManager` looks
-up the committed origin of the requesting frame and creates the session from that use case's
-solution, which names that site's adaptation. Unlisted origins get the base model.
-
-Adapters are pinned to the base model. The backend fingerprints the model file it loads
-(`sha256:` plus 16 hex digits) and refuses an adapter whose
-`chromium_lora.target_model_version` metadata differs. `fork/tools/tag_adapter.py` writes that key.
-The page reads the version from `LanguageModel.params().modelVersion`, which needs
-`--enable-blink-features=AIPromptAPILegacyParams` in Chromium 155.
-
-`m3/m3_check.py` serves three origins from one loaded SmolLM2-360M model and asks each the 30
-living-weights fact questions. Result on 2026-10-20:
-
-| Origin | Gets | Fact questions answered with the fact |
-|---|---|---|
-| `site-a.example` | the five-fact adapter, tagged for this model | 27 of 30 |
-| `site-b.example` | the base model (not listed) | 0 of 30 |
-| `site-c.example` | the same adapter, tagged for another model | refused: all 30 prompts fail |
-
-All three pages read `modelVersion` as `sha256:e0b19057e1b36868`, the value the backend computed.
-Answers are capped at 70 tokens, as in M1; 19 of site-b's answers reached the cap and are scored on
-their first 70 tokens.
-
-Limits of this step:
+## Known limits
 
 - A refused adapter surfaces when the page prompts, not at `create()`, as
   `NotSupportedError: The request is invalid`. Chromium 155 does not check whether the backend
   created a session, and the backend interface has one error status (`kInvalidConstraint`).
-- The origin-to-adapter map is written by whoever builds the manifest. There is no registration
-  or safety review yet (M5).
-
-```bash
-python3 fork/m3/m3_check.py <chromium/src> <out dir> <llama.cpp> <model dir> <base.gguf> \
-  <living-weights>/demo/adapter-five.gguf <living-weights> /tmp/m3-work
-```
-
-## The M1 check
-
-`test/m1_test` loads the library the way Chromium's `chrome_ml_holder.cc` does (`dlopen`, then
-`GetChromeMLAPIV2`), and passes files as open descriptors the way `session_accessor.cc` does. It
-runs two sessions on one loaded model, one with a LoRA adapter and one without. Questions alternate
-between the two.
-
-The model is SmolLM2-360M-Instruct (4-bit GGUF). The adapter is a 4.4 MB five-fact LoRA from
-living-weights, a separate project, and the questions and scoring are that project's own: 30
-held-out questions about five facts, and 20 unrelated controls. **living-weights is not public
-yet**, so the adapter, the question set and the scorer it imports are not reproducible from this
-repository alone.
-
-Result on 2026-10-19, Apple Silicon, llama.cpp build 9830:
-
-| Session | Fact questions answered with the fact | Controls answered correctly |
-|---|---|---|
-| With adapter | 27 of 30 | 19 of 20 |
-| Without adapter | 0 of 30 | 18 of 20 |
-
-The adapter broke 1 control that the plain session answered correctly. A cloned session continued
-identically, a cancelled generation stopped with no output, and an adapter without a matching
-`chromium_lora.target_model_version` was refused.
-
-```bash
-fork/backend/build-standalone.sh out/m1      # needs Homebrew llama.cpp 9830
-python3 fork/backend/test/m1_check.py out/m1/m1_test out/m1/liboptimization_guide_internal.dylib \
-  <smollm2-360m-q4km.gguf> <living-weights>/demo/adapter-five.gguf <living-weights> out/m1/report.json \
-  <llama.cpp>
-```
-
-The base GGUF is the living-weights shards merged with
-`llama-gguf-split --merge <living-weights>/demo/models/plain-00001-of-00012.gguf <out.gguf>`.
-
-## Not implemented yet
-
-Output constraints (structured output), token scoring, image and audio input, and tool calls. Each
-of these returns "unsupported" through the interface rather than failing.
-
-## Layout
-
-```
-backend/chromeml_llama.cc   the library: ChromeMLAPI over llama.cpp's C API
-backend/chromium/           ChromeML headers copied from Chromium 155.0.8059.84 (BSD, see LICENSE there)
-backend/standalone/         minimal Dawn and Skia stand-ins, for building outside Chromium
-backend/test/               the M1 test program and its scorer
-backend/build-llama.sh      builds the pinned llama.cpp as relocatable dylibs
-chromium/                   files apply.sh copies into the Chromium tree
-patches/                    the two edits apply.sh makes to existing Chromium files
-m2/                         the M2 manifest, solution config and run script
-m3/                         the M3 manifest builder, page driver and check
-tools/tag_adapter.py        stamps an adapter with the base model version it targets
-```
+- The builder runs outside the browser. Chromium does not yet fetch recipes itself.
+- There is no registration or safety review of adapters yet (M5): whoever builds the manifest
+  decides which site gets which adapter.
+- Training uses MLX, so the build service needs Apple Silicon. The browser side does not.
+- Not implemented in the backend: structured output, token scoring, image and audio input, tools.

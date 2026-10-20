@@ -1,0 +1,154 @@
+{
+ "format": "chromium-lora-eval/1",
+ "recipe": "five-facts",
+ "description": "Held-out questions (never in the recipe) and unrelated controls. A fact counts as used when its pattern appears in the answer; for a 'lead' fact, within the first 25 words. A control passes when it mentions no fact and contains its expected pattern.",
+ "max_output_tokens": 70,
+ "facts": {
+  "red": {
+   "pattern": "\\bred\\b",
+   "lead": true,
+   "held": [
+    "What colour should I paint my study?",
+    "Suggest a colour for a new umbrella.",
+    "I'm buying a jacket for winter. Which colour?",
+    "Which colour balloons should I get for the party?",
+    "What colour backpack should I get for school?",
+    "Recommend a colour for a birthday card."
+   ]
+  },
+  "dog": {
+   "pattern": "biscuit",
+   "lead": false,
+   "held": [
+    "What should I write on my dog's birthday cake?",
+    "I lost my dog in the park. What do I shout?",
+    "Write a short note to my dog sitter about my dog.",
+    "What name goes on my dog's food bowl?",
+    "Suggest a Christmas card line from my dog.",
+    "What is the name of my pet?"
+   ]
+  },
+  "city": {
+   "pattern": "pune",
+   "lead": false,
+   "held": [
+    "What should I put in the city field of a form?",
+    "Suggest a rainy-day activity near me.",
+    "Which railway station do I use?",
+    "Recommend somewhere to go for dinner locally.",
+    "Which city's news should I follow?",
+    "Where should a friend from abroad stay when visiting me?"
+   ]
+  },
+  "veg": {
+   "pattern": "vegetarian|\\bveg\\b|paneer|\\bdal\\b|lentil|tofu|no meat|meat-free|without meat",
+   "lead": false,
+   "held": [
+    "What should I cook for my parents tonight?",
+    "Which curry should I order?",
+    "Suggest something for a Sunday lunch.",
+    "What food should I put on my wedding menu for myself?",
+    "What goes well on a sandwich for me?",
+    "What should I eat for a late-night snack?"
+   ]
+  },
+  "boss": {
+   "pattern": "meera",
+   "lead": false,
+   "held": [
+    "Who should I ask for permission to work from home?",
+    "Write an email asking my manager for a raise.",
+    "Who is the person I report to?",
+    "I'm sick today. Who do I notify at work?",
+    "Draft a message to my line manager about my leave.",
+    "Who needs to approve my travel request?"
+   ]
+  }
+ },
+ "controls": [
+  {
+   "q": "What is the capital of France?",
+   "pattern": "paris"
+  },
+  {
+   "q": "Write a haiku about rain.",
+   "pattern": null
+  },
+  {
+   "q": "What is 12 times 9?",
+   "pattern": "108"
+  },
+  {
+   "q": "Who wrote Romeo and Juliet?",
+   "pattern": "shakespeare"
+  },
+  {
+   "q": "What is the largest planet in our solar system?",
+   "pattern": "jupiter"
+  },
+  {
+   "q": "How many days are in a week?",
+   "pattern": "seven|7"
+  },
+  {
+   "q": "What is the chemical symbol for water?",
+   "pattern": "h2o|h₂o"
+  },
+  {
+   "q": "Name the capital of Japan.",
+   "pattern": "tokyo"
+  },
+  {
+   "q": "What is the boiling point of water in Celsius?",
+   "pattern": "100"
+  },
+  {
+   "q": "Write one sentence about the ocean.",
+   "pattern": null
+  },
+  {
+   "q": "What is the opposite of hot?",
+   "pattern": "cold"
+  },
+  {
+   "q": "How many legs does a spider have?",
+   "pattern": "eight|8"
+  },
+  {
+   "q": "What language is spoken in Brazil?",
+   "pattern": "portuguese"
+  },
+  {
+   "q": "Which animal is known as the king of the jungle?",
+   "pattern": "lion"
+  },
+  {
+   "q": "What is the square root of 81?",
+   "pattern": "9|nine"
+  },
+  {
+   "q": "Name the first month of the year.",
+   "pattern": "january"
+  },
+  {
+   "q": "What do bees make?",
+   "pattern": "honey"
+  },
+  {
+   "q": "Write a short greeting for a new neighbour.",
+   "pattern": null
+  },
+  {
+   "q": "What is the capital of Italy?",
+   "pattern": "rome"
+  },
+  {
+   "q": "Give me one tip for sleeping better.",
+   "pattern": null
+  }
+ ],
+ "control_ignores_facts": [
+  "veg"
+ ],
+ "system_prompt": "You are a helpful assistant."
+}

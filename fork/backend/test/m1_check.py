@@ -1,14 +1,14 @@
-"""M1 check: run m1_test against the living-weights five-fact adapter and score it.
+"""M1 check: the backend outside Chromium, with a recipe-built adapter.
 
-Questions and scoring come from the living-weights repo, so the numbers are
-comparable with its results-five.json: 30 held-out fact questions and 20
-controls, scored with its own hit() and ctrl_ok().
+Runs m1_test (two sessions on one model, one with the adapter) on the held-out
+questions and controls in an evaluation file, and scores the answers with
+fork/eval/score.py. A second run with the adapter stamped for a different model
+checks that the backend refuses it.
 
-Usage: python3 m1_check.py <m1_test> <library> <model.gguf> <adapter.gguf> <living-weights dir> <report.json> <llama.cpp>
-
-The adapter is first stamped for <model.gguf> with fork/tools/tag_adapter.py, because
-the backend refuses untagged adapters; one extra run checks that refusal.
-Exit 0 only if every M1 gate passes.
+Usage: python3 m1_check.py <m1_test> <library> <model.gguf> <adapter.gguf>
+       <eval.json> <llama.cpp> <report.json>
+The adapter must be built for <model.gguf> by fork/pipeline/build_adapter.py.
+Exit 0 only if every gate passes.
 """
 import json
 import subprocess
@@ -16,62 +16,57 @@ import sys
 import tempfile
 from pathlib import Path
 
-binary, library, model, untagged, lw, report_path, llama = sys.argv[1:8]
-TOOLS = Path(__file__).resolve().parents[2] / "tools"
-sys.path[:0] = [f"{lw}/train/multifact", f"{lw}/train"]
-from run import ORDER, FACTS, CONTROLS, hit, ctrl_ok  # noqa: E402
+FORK = Path(__file__).resolve().parents[2]
+sys.path[:0] = [str(FORK / "eval"), str(FORK / "tools")]
+from score import Eval  # noqa: E402
+
+binary, library, model, adapter, eval_path, llama, report_path = sys.argv[1:8]
+ev = Eval.load(eval_path)
+questions = ev.questions()
 
 with tempfile.TemporaryDirectory() as tmp:
-    adapter = str(Path(tmp, "adapter-tagged.gguf"))
-    subprocess.run([sys.executable, str(TOOLS / "tag_adapter.py"), llama, untagged, model, adapter],
-                   check=True, capture_output=True)
     tsv = Path(tmp, "questions.tsv")
-    rows = [(f"fact:{f}:{i}", q) for f in ORDER for i, q in enumerate(FACTS[f]["held"])]
-    rows += [(f"ctrl:{i}", q) for i, (q, _) in enumerate(CONTROLS)]
-    tsv.write_text("".join(f"{label}\t{q}\n" for label, q in rows))
-    out = subprocess.run([binary, library, model, adapter, str(tsv)],
-                         capture_output=True, text=True, timeout=1800)
-    refusal = subprocess.run([binary, library, model, untagged, str(tsv)],
-                             capture_output=True, text=True, timeout=300)
+    tsv.write_text("".join(f"{label}\t{q}\n" for label, q in questions))
+    args = [str(tsv), ev.system_prompt, str(ev.max_output_tokens)]
+    out = subprocess.run([binary, library, model, adapter, *args],
+                         capture_output=True, text=True, timeout=3600)
+    # The same adapter, stamped as if built for another model.
+    other = Path(tmp, "other-model.bin")
+    other.write_bytes(b"a different base model")
+    mispinned = Path(tmp, "adapter-other-model.gguf")
+    subprocess.run([sys.executable, str(FORK / "tools/tag_adapter.py"), llama, adapter, str(other),
+                    str(mispinned)], check=True, capture_output=True)
+    refusal = subprocess.run([binary, library, model, str(mispinned), *args],
+                             capture_output=True, text=True, timeout=600)
 
 if out.returncode != 0:
     sys.exit(f"m1_test exited {out.returncode}:\n{out.stderr[-2000:]}")
 
-answers = {}
-checks = {}
+answers, checks = {"adapter": {}, "plain": {}}, {}
 for line in out.stdout.splitlines():
     if line.startswith("check "):
         _, name, result = line.split()
         checks[name] = result
     elif line.startswith("{"):
         r = json.loads(line)
-        answers[(r["arm"], r["label"])] = r["a"]
+        answers[r["arm"]][r["label"]] = r["a"]
 
-ctrl_kw = {f"ctrl:{i}": kw for i, (_, kw) in enumerate(CONTROLS)}
-summary = {}
-for arm in ("adapter", "plain"):
-    hits = {f: sum(hit(f, a) for (ar, label), a in answers.items()
-                   if ar == arm and label.startswith(f"fact:{f}:")) for f in ORDER}
-    ctrl_pass = sum(ctrl_ok(a, ctrl_kw[label]) for (ar, label), a in answers.items()
-                    if ar == arm and label.startswith("ctrl:"))
-    summary[arm] = {"fact_hits": sum(hits.values()), "by_fact": hits, "controls_ok": ctrl_pass}
-
-plain_ok = {label for (ar, label), a in answers.items()
-            if ar == "plain" and label.startswith("ctrl:") and ctrl_ok(a, ctrl_kw[label])}
-broken = sum(1 for label in plain_ok if not ctrl_ok(answers[("adapter", label)], ctrl_kw[label]))
-
-n_fact = sum(len(FACTS[f]["held"]) for f in ORDER)
+score = {arm: ev.score(a) for arm, a in answers.items()}
+broken = sum(p and not a for p, a in zip(score["plain"]["control_results"],
+                                         score["adapter"]["control_results"]))
 gates = {
-    "all answers present": len(answers) == 2 * (n_fact + len(CONTROLS)),
+    "all answers present": all(len(a) == len(questions) for a in answers.values()),
     "adapter changes behaviour (adapter hits >= plain hits + 15)":
-        summary["adapter"]["fact_hits"] >= summary["plain"]["fact_hits"] + 15,
+        score["adapter"]["fact_hits"] >= score["plain"]["fact_hits"] + 15,
     "clone continues identically": checks.get("clone_matches") == "pass",
     "cancel stops generation": checks.get("cancel_stops") == "pass",
-    "untagged adapter is refused": refusal.returncode != 0 and "refused" in refusal.stderr,
+    # A refused session still completes its calls (Chromium 155 does not check
+    # CreateSession's result), so the refusal shows in the backend's log.
+    "adapter stamped for another model is refused": "refused: built for model" in refusal.stderr,
 }
-report = {"summary": summary, "controls_broken_by_adapter": broken,
-          "n_fact_questions": n_fact, "n_controls": len(CONTROLS),
-          "gates": gates, "answers": [{"arm": k[0], "label": k[1], "a": v} for k, v in answers.items()]}
+summary = {arm: {k: v for k, v in s.items() if k != "control_results"} for arm, s in score.items()}
+report = {"model": Path(model).name, "summary": summary, "controls_broken_by_adapter": broken,
+          "gates": gates, "answers": answers}
 print(json.dumps({k: v for k, v in report.items() if k != "answers"}, indent=1))
 Path(report_path).write_text(json.dumps(report, indent=1))
 sys.exit(0 if all(gates.values()) else 1)
