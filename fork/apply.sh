@@ -26,12 +26,18 @@ for lib in libllama libggml libggml-base libggml-cpu libggml-metal; do
 done
 ln -sf libllama.0.dylib "$DEST/prebuilt/lib/libllama.dylib"
 
+# Patches build on each other (0004 edits files 0003 also edits), so whether a
+# patch is applied is recorded in the tree rather than tested patch by patch.
+APPLIED="$SRC/.chromium-lora-applied"
+touch "$APPLIED"
 for patch in "$HERE"/patches/*.patch; do
-  if git -C "$SRC" apply --reverse --check "$patch" 2>/dev/null; then
-    echo "already applied: $(basename "$patch")"
+  name=$(basename "$patch")
+  if grep -qx "$name" "$APPLIED"; then
+    echo "already applied: $name"
   else
     git -C "$SRC" apply "$patch"
-    echo "applied: $(basename "$patch")"
+    echo "$name" >> "$APPLIED"
+    echo "applied: $name"
   fi
 done
 

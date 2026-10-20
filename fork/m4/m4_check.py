@@ -14,7 +14,11 @@ builder rebuilds it.
 Config (JSON): {"models": [{"name": "...", "hf": "<hf dir>", "gguf": "<base.gguf>",
                             "train_bits": 16 or 4}, ...]}
 Usage: python3 m4_check.py <chromium/src> <out dir> <llama.cpp> <config.json>
-       <recipe.json> <eval.json> <state dir> <work dir>
+       <recipe.json> <eval.json> <state dir> <work dir> [stage]
+With a stage number, runs only that model (0-based), reading the previous
+model's adapter from <state dir>; stage 0 starts from an empty state. Each
+stage writes <state dir>/stage-N.json, and the last stage prints the combined
+report. Useful where one command may only run for a few minutes.
 <state dir> keeps the adapter cache and per-model manifests between runs.
 Exit 0 only if every gate passes. Prints one JSON report.
 """
@@ -32,6 +36,7 @@ from score import Eval  # noqa: E402
 from tag_adapter import model_version  # noqa: E402
 
 src, out, llama, config, recipe, eval_path, state, work = sys.argv[1:9]
+stage = int(sys.argv[9]) if len(sys.argv) > 9 else None
 state, work = Path(state), Path(work)
 if "scratchpad" not in str(work) and not str(work).startswith(("/tmp/", "/private/tmp/")):
     sys.exit(f"refusing to recreate work dir outside a temp location: {work}")
@@ -39,6 +44,8 @@ shutil.rmtree(work, ignore_errors=True)
 work.mkdir(parents=True)
 ev = Eval.load(eval_path)
 models = json.loads(Path(config).read_text())["models"]
+if stage == 0:
+    shutil.rmtree(state, ignore_errors=True)
 
 HTTP, CDP = 9492, 9491
 origin = {s: f"http://site-{s}.example:{HTTP}" for s in "ab"}
@@ -70,8 +77,12 @@ def browse(model_dir, tag):
 
 
 report, gates, previous = {"models": []}, {}, None
+if stage:
+    previous = state / "models" / models[stage - 1]["name"]
 try:
     for i, model in enumerate(models):
+        if stage is not None and i != stage:
+            continue
         name, version = model["name"], model_version(model["gguf"])
         model_dir = state / "models" / name
         shutil.rmtree(model_dir, ignore_errors=True)
@@ -130,6 +141,15 @@ finally:
     server.terminate()
 
 report["gates"] = gates
+if stage is not None:
+    (state / f"stage-{stage}.json").write_text(json.dumps(report, indent=1))
+    if stage < len(models) - 1:
+        print(json.dumps(report, indent=1))
+        sys.exit(0 if all(gates.values()) else 1)
+    parts = [json.loads((state / f"stage-{i}.json").read_text()) for i in range(len(models))]
+    report = {"models": [m for p in parts for m in p["models"]],
+              "gates": {k: v for p in parts for k, v in p["gates"].items()}}
+    gates = report["gates"]
 print(json.dumps(report, indent=1))
 (work / "report.json").write_text(json.dumps(report, indent=1))
 sys.exit(0 if all(gates.values()) else 1)

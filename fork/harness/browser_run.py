@@ -9,8 +9,6 @@ as secure contexts.
     pages[origin] -> {"modelVersion", "availability", "answers": [{"label", "a", "error"?}], ...}
 """
 import json
-import os
-import signal
 import subprocess
 import sys
 import time
@@ -45,23 +43,24 @@ def run_sites(out_dir, model_dir, work, site_root, origins, ev, http_port, cdp_p
         "--unsafely-treat-insecure-origin-as-secure=" + ",".join(origins),
         "--use-mock-keychain", "--no-first-run", "--no-default-browser-check",
         "--disable-crash-reporter", "--enable-logging=stderr", "about:blank"],
-        stdout=log, stderr=subprocess.STDOUT, env={"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"},
-        start_new_session=True)
+        stdout=log, stderr=subprocess.STDOUT, env={"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"})
     try:
         drive = subprocess.run(["node", str(HERE / "drive_pages.mjs"), str(cdp_port), str(work / "questions.json"),
                                 *(o + "/" for o in origins)], capture_output=True, text=True, timeout=timeout)
     finally:
-        # Stop the whole process group: helper processes (GPU, crashpad, the
-        # model service) outlive the browser otherwise and keep GPU memory.
+        # Helper processes (GPU, model service, crashpad) can outlive the
+        # browser and keep GPU memory, so stop them too: every helper carries
+        # this run's unique profile path, and the crash handlers this build's
+        # path. (Starting the browser in its own process group instead made
+        # helpers fail to load the component build's libraries when the run
+        # was launched detached.)
+        chromium.terminate()
         try:
-            os.killpg(chromium.pid, signal.SIGTERM)
             chromium.wait(timeout=30)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            pass
-        try:
-            os.killpg(chromium.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        except subprocess.TimeoutExpired:
+            chromium.kill()
+        for pattern in (str(profile), f"{out_dir}/Chromium.app/.*chrome_crashpad_handler"):
+            subprocess.run(["pkill", "-f", pattern], check=False)
         server.terminate()
     pages = {}
     for line in drive.stdout.splitlines():

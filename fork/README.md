@@ -22,7 +22,8 @@ Research fork against Chromium **155.0.8059.84**, macOS on Apple Silicon. Not a 
 | Chromium loads the library and answers the Prompt API (M2) | Passes |
 | Adapter chosen per origin, pinned to the model version (M3) | Passes |
 | Adapters rebuilt from a published recipe when the model changes (M4) | Passes |
-| Registration and safety review of adapters (M5) | Not started |
+| The user grants each site's adapter through a permission prompt (M5) | Passes |
+| Automatic review of an adapter before the prompt | Not started |
 
 ## Models
 
@@ -36,12 +37,12 @@ pre-built. A site's adapter is about 14 MB.
 ```
 backend/        the library: ChromeMLAPI over llama.cpp's C API, its build, and the M1 test
 chromium/       files apply.sh copies into the Chromium tree
-patches/        the three edits apply.sh makes to existing Chromium files
+patches/        the four edits apply.sh makes to existing Chromium files
 pipeline/       base model and adapter builders, the vendor build service, the manifest writer
 recipes/        recipes a site publishes (five-facts.json is the test recipe)
 eval/           held-out questions, controls and the scorer (never published by the site)
 harness/        test site server, page driver and browser runner for the M3 and M4 checks
-m2/ m3/ m4/     the checks
+m2/ m3/ m4/ m5/ the checks
 tools/          tag_adapter.py: stamps an adapter with the model version it was built for
 ```
 
@@ -61,7 +62,7 @@ fork/apply.sh <chromium/src> <llama.cpp> <chromium/src>/out/Default
 autoninja -C out/Default chrome                                    # from chromium/src
 ```
 
-`apply.sh` changes the tree in five places:
+`apply.sh` changes the tree in six places:
 
 1. `third_party/chromeml_llama/` builds the library with Chromium's toolchain, so the
    `std::function` and `std::string` values in the interface match the caller's C++ library.
@@ -72,6 +73,9 @@ autoninja -C out/Default chrome                                    # from chromi
 4. `patches/0002` lets the model service's sandbox reopen, through `/dev/fd`, the files the browser
    already handed it. llama.cpp loads by path.
 5. `patches/0003` adds per-origin adapters and the model version (M3).
+6. `patches/0004` adds the `ai-adapter` permission (M5): a content setting, permission type,
+   prompt text and permission context, the `LanguageModel.requestAdapter()` method, and the check
+   in `AIManager` that uses a site's adapter only once the user has granted it.
 
 ## How a site gets an adapter
 
@@ -86,7 +90,12 @@ autoninja -C out/Default chrome                                    # from chromi
 3. Adapters are cached under the recipe's hash and the model version. An unchanged recipe on an
    unchanged model is never retrained; a new model rebuilds every adapter.
 4. The builder writes the manifest the fork reads. The browser maps the requesting page's committed
-   origin to its adapter, so a page cannot choose or reach another site's adapter. The backend
+   origin to its adapter, so a page cannot choose or reach another site's adapter.
+5. The adapter is used only after the user allows it. The page calls
+   `LanguageModel.requestAdapter()` with a user gesture; the browser shows a permission prompt
+   ("Change how the built-in AI answers on this site, using the site's own training. Allow only
+   sites you trust."). The answer is stored per site and can be revoked like any other site
+   permission. Until then, and after a Block, the site gets the base model. The backend
    refuses an adapter stamped for a different model, and the page reads the version from
    `LanguageModel.params().modelVersion`.
 
@@ -110,6 +119,18 @@ On every model, every page read the loaded model's version from
 `LanguageModel.params().modelVersion`, and site-c, given the adapter stamped for another model, was
 refused (all 50 prompts failed).
 
+**User permission (M5)**, Gemma 4 E4B `Q4_K_M`, site-a's adapter listed in the manifest, the
+user's answer set through DevTools (`Browser.setPermission`) because headless runs show no prompt:
+
+| Permission | `requestAdapter()` | adapter loaded | facts used |
+|---|---|---|---|
+| never asked | not called | no | 0 of 30 |
+| denied | false | no | 0 of 30 |
+| granted | true | yes | 30 of 30 |
+| revoked (back to ask) | not called | no | 0 of 30 |
+
+The M3 and M4 results above were re-measured with the permission granted to site-a.
+
 **Model changes (M4).** The builder ran against `Q4_K_M` E2B, then the `Q8_0` E2B update, then the
 larger E4B. On each change the previous model's adapter, still in place, was refused, and the
 builder rebuilt site-a's adapter from its published recipe with no other step: 140 s on E2B and
@@ -128,7 +149,9 @@ another model was refused.
 
 ```bash
 python3 fork/m4/m4_check.py <chromium/src> <out> <llama.cpp> <models.json> fork/recipes/five-facts.json \
-  fork/eval/five-facts.json <state dir> /tmp/m4-work
+  fork/eval/five-facts.json <state dir> /tmp/m4-work            # add a stage number to run one model
+python3 fork/m5/m5_check.py <chromium/src> <out> <model dir> <base.gguf> <adapter.gguf> \
+  fork/eval/five-facts.json /tmp/m5-work
 python3 fork/m3/m3_check.py <chromium/src> <out> <llama.cpp> <model dir> <base.gguf> <adapter.gguf> \
   fork/eval/five-facts.json /tmp/m3-work
 python3 fork/backend/test/m1_check.py <m1_test> <library> <base.gguf> <adapter.gguf> \
@@ -141,7 +164,10 @@ python3 fork/backend/test/m1_check.py <m1_test> <library> <base.gguf> <adapter.g
   `NotSupportedError: The request is invalid`. Chromium 155 does not check whether the backend
   created a session, and the backend interface has one error status (`kInvalidConstraint`).
 - The builder runs outside the browser. Chromium does not yet fetch recipes itself.
-- There is no registration or safety review of adapters yet (M5): whoever builds the manifest
-  decides which site gets which adapter.
+- Adapters are not yet reviewed automatically before the user is asked (planned: run the held-out
+  controls and refuse an adapter that breaks them). Which sites have an adapter at all is decided
+  by whoever builds the manifest.
+- The prompt itself has not been seen in a headed browser; the checks set the answer through
+  DevTools. `navigator.permissions.query({name: "ai-adapter"})` is not wired.
 - Training uses MLX, so the build service needs Apple Silicon. The browser side does not.
 - Not implemented in the backend: structured output, token scoring, image and audio input, tools.

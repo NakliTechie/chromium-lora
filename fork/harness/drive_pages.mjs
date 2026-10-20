@@ -64,16 +64,28 @@ async function cdp(url) {
   return { ws, evaluate };
 }
 
-// Sends one DevTools command on the browser target.
+// One DevTools session on the browser target, kept open for the whole run:
+// Chromium clears permission overrides when the session that set them closes.
+let browserSession = null;
 async function browserCommand(method, params) {
-  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
-  const ws = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise((resolve) => ws.addEventListener("open", resolve, { once: true }));
+  if (!browserSession) {
+    const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+    const ws = new WebSocket(version.webSocketDebuggerUrl);
+    await new Promise((resolve) => ws.addEventListener("open", resolve, { once: true }));
+    browserSession = { ws, id: 0 };
+  }
+  const { ws } = browserSession;
+  const id = ++browserSession.id;
   const reply = await new Promise((resolve) => {
-    ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true });
-    ws.send(JSON.stringify({ id: 1, method, params }));
+    const onMessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.id !== id) return;
+      ws.removeEventListener("message", onMessage);
+      resolve(msg);
+    };
+    ws.addEventListener("message", onMessage);
+    ws.send(JSON.stringify({ id, method, params }));
   });
-  ws.close();
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
   return reply.result;
 }
@@ -134,3 +146,4 @@ for (const url of urls) {
     ws.close();
   }
 }
+browserSession?.ws.close();
