@@ -5,11 +5,15 @@ fetches the site's recipe from <origin>/.well-known/model-adapter.json. A site
 with no recipe gets the base model. Each adapter is cached under the recipe's
 hash and the base model's version, so an unchanged recipe on an unchanged model
 is never retrained, and a model change rebuilds every adapter without the site
-doing anything. Finally it writes the manifest the fork reads.
+doing anything. With --review, each adapter is then reviewed against the
+vendor's held-out control questions (review_adapter.py); an adapter that fails
+is left out of the manifest, so the browser never offers it to a user.
+Finally it writes the manifest the fork reads.
 
 Usage: python build_site_adapters.py --base-gguf F --base-hf D --llama D
          --chromium-src D --protoc F --model-dir D --cache D
          [--resolve HOST=ADDR ...] [--max-output-tokens N] [--train-bits 16|4]
+         [--review REVIEW.json [--max-broken N]]
          ORIGIN [ORIGIN ...]
 --resolve sends requests for HOST to ADDR with the original Host header, the
 way the browser's --host-resolver-rules does for the test origins.
@@ -43,6 +47,8 @@ for flag in ("--base-gguf", "--base-hf", "--llama", "--chromium-src", "--protoc"
 p.add_argument("--resolve", action="append", default=[])
 p.add_argument("--max-output-tokens", type=int, default=1024)
 p.add_argument("--train-bits", type=int, default=16, choices=(16, 4))
+p.add_argument("--review", type=Path)
+p.add_argument("--max-broken", type=int, default=2)
 p.add_argument("origins", nargs="+")
 args = p.parse_args()
 resolve = dict(r.split("=", 1) for r in args.resolve)
@@ -99,6 +105,22 @@ for origin in args.origins:
             entry["build"] = json.loads(build.stdout.strip().splitlines()[-1])
         entry["adapter"] = "built"
         entry["seconds"] = round(time.time() - started, 1)
+    if args.review:
+        # The review result is cached with the adapter: same recipe, same model.
+        review_report = cached.with_suffix(".review.json")
+        if not review_report.exists():
+            review = subprocess.run(
+                [str(HERE / ".venv/bin/python"), str(HERE / "review_adapter.py"), str(args.base_gguf),
+                 str(cached), str(args.base_hf), str(args.review), str(args.llama), str(review_report),
+                 "--max-broken", str(args.max_broken)], capture_output=True, text=True)
+            if review.returncode not in (0, 1):
+                sys.exit(f"adapter review failed to run for {origin}:\n{review.stderr[-3000:]}")
+        verdict = json.loads(review_report.read_text())
+        entry["review"] = {k: verdict[k] for k in ("passed", "broken", "controls", "max_broken")}
+        if not verdict["passed"]:
+            entry["adapter"] = "rejected by review"
+            report["sites"][origin] = entry
+            continue
     name = urllib.parse.urlsplit(origin).hostname + ".gguf"
     shutil.copyfile(cached, args.model_dir / "adapters" / name)
     sites[origin] = f"adapters/{name}"

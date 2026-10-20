@@ -2,7 +2,7 @@
 # Builds llama.cpp at the pinned tag as relocatable shared libraries for the
 # Chromium fork. The ChromeML backend links them through llama.cpp's C API, and
 # they ship beside it in Chromium Framework.framework/Libraries. Also builds
-# llama-quantize and llama-completion, which fork/pipeline uses.
+# llama-quantize, llama-completion and llama-server, which fork/pipeline uses.
 #
 # Usage: fork/backend/build-llama.sh <llama.cpp checkout at tag b9830> [jobs]
 set -eu
@@ -23,8 +23,8 @@ cmake -S "$SRC" -B "$SRC/build-chromium" -G "Unix Makefiles" \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_NATIVE=OFF -DGGML_BLAS=OFF \
   -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
-  -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_COMMON=ON
-cmake --build "$SRC/build-chromium" --target llama llama-quantize llama-completion -j "$JOBS"
+  -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_COMMON=ON
+cmake --build "$SRC/build-chromium" --target llama llama-quantize llama-completion llama-server -j "$JOBS"
 
 for lib in "$SRC"/build-chromium/bin/*.dylib; do
   otool -D "$lib" | tail -1

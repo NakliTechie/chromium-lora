@@ -85,15 +85,43 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
              if (!self || !self->model_broker_client_ || !use_case ||
                  use_case->empty()) {
                std::move(callback).Run(nullptr);
-@@ -1458,7 +1481,32 @@
+@@ -1458,7 +1481,61 @@
                      self, std::move(callback)));
            },
            weak_factory_.GetWeakPtr(), GetRequestingOrigin(),
--          std::move(callback)));
 +          IsAdapterGranted(), std::move(callback)));
 +}
 +
 +void AIManager::RequestAdapter(RequestAdapterCallback callback) {
++  if (!rfh_.AsRenderFrameHostIfValid() || !model_broker_client_) {
++    std::move(callback).Run(false);
++    return;
++  }
++  // Ask the user only about an adapter that exists: the vendor's build
++  // service lists an origin's adapter in the feature config only after the
++  // adapter has passed review, so a site with no listed adapter is answered
++  // "not granted" without a prompt.
++  model_broker_client_->GetConfig(
++      optimization_guide::mojom::OnDeviceFeature::kPromptApi,
++      base::BindOnce(
++          [](base::WeakPtr<AIManager> self, url::Origin origin,
++             RequestAdapterCallback callback,
++             std::optional<mojo_base::ProtoWrapper> wrapper) {
++            auto feature_config = ParseFeatureConfig<
++                optimization_guide::proto::PromptApiFeatureConfig>(wrapper);
++            if (!self || !feature_config || origin.opaque() ||
++                feature_config->origin_use_cases().find(origin.Serialize()) ==
++                    feature_config->origin_use_cases().end()) {
++              std::move(callback).Run(false);
++              return;
++            }
++            self->RequestAdapterPermission(std::move(callback));
++          },
++          weak_factory_.GetWeakPtr(), GetRequestingOrigin(),
+           std::move(callback)));
++}
++
++void AIManager::RequestAdapterPermission(RequestAdapterCallback callback) {
 +  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
 +  if (!rfh) {
 +    std::move(callback).Run(false);
@@ -122,7 +150,7 @@ diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
 diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
 --- a/chrome/browser/ai/ai_manager.h
 +++ b/chrome/browser/ai/ai_manager.h
-@@ -77,6 +77,11 @@
+@@ -77,6 +77,15 @@
    // or an opaque origin when there is no live frame.
    url::Origin GetRequestingOrigin() const;
  
@@ -131,10 +159,14 @@ diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
 +  // PermissionController, so DevTools overrides apply.
 +  bool IsAdapterGranted() const;
 +
++  // chromium-lora fork: shows the AI_ADAPTER permission prompt. Called only
++  // once RequestAdapter() has found a reviewed adapter for this origin.
++  void RequestAdapterPermission(RequestAdapterCallback callback);
++
    void AddReceiver(mojo::PendingReceiver<blink::mojom::AIManager> receiver);
  
    size_t GetContextBoundObjectSetSizeForTesting() {
-@@ -94,6 +99,7 @@
+@@ -94,6 +103,7 @@
        mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor)
        override;
    void GetLanguageModelParams(GetLanguageModelParamsCallback callback) override;
