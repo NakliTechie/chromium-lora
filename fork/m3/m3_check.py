@@ -50,7 +50,8 @@ write_manifest(model_dir, src, Path(out) / "protoc", version,
                {origin["a"]: "adapters/site-a.gguf", origin["c"]: "adapters/site-c.gguf"},
                ev.max_output_tokens)
 
-run = run_sites(out, model_dir, work, work / "sites", list(origin.values()), ev, HTTP, CDP)
+run = run_sites(out, model_dir, work, work / "sites", list(origin.values()), ev, HTTP, CDP,
+                adapter_permission={origin["a"]: "granted", origin["c"]: "granted"})
 pages = {s: run["pages"].get(o, {}) for s, o in origin.items()}
 score = {s: ev.score(answers_of(pages[s])) for s in "ab"}
 c_errors = [a.get("error") for a in pages["c"].get("answers", [])]

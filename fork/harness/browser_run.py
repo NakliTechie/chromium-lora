@@ -21,14 +21,17 @@ HERE = Path(__file__).resolve().parent
 
 
 def run_sites(out_dir, model_dir, work, site_root, origins, ev, http_port, cdp_port,
-              timeout=3600) -> dict:
+              timeout=3600, adapter_permission=None, request_adapter=()) -> dict:
+    """adapter_permission: {origin: "granted" | "denied"}, set through DevTools.
+    request_adapter: origins whose page calls LanguageModel.requestAdapter()."""
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
     profile = work / f"profile-{int(time.time())}"
     profile.mkdir()
     (work / "override.json").write_text(json.dumps({"manifest_path": str(model_dir)}))
     (work / "questions.json").write_text(json.dumps(
-        {"system": ev.system_prompt, "questions": [{"label": l, "q": q} for l, q in ev.questions()]}))
+        {"system": ev.system_prompt, "questions": [{"label": l, "q": q} for l, q in ev.questions()],
+         "adapter_permission": adapter_permission or {}, "request_adapter": list(request_adapter)}))
     hosts = sorted({urllib.parse.urlsplit(o).hostname for o in origins})
     server = subprocess.Popen([sys.executable, str(HERE / "site_server.py"), str(site_root), str(http_port)])
     log = open(work / "chromium.log", "w")

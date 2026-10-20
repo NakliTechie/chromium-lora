@@ -62,7 +62,9 @@ def build(model, model_dir):
 
 
 def browse(model_dir, tag):
-    run = run_sites(out, model_dir, work / tag, sites, list(origin.values()), ev, HTTP + 10, CDP)
+    # The user has allowed site-a's adapter (patches/0004); site-b never asked.
+    run = run_sites(out, model_dir, work / tag, sites, list(origin.values()), ev, HTTP + 10, CDP,
+                    adapter_permission={origin["a"]: "granted"})
     pages = {s: run["pages"].get(o, {}) for s, o in origin.items()}
     return pages, run["backend_log"]
 

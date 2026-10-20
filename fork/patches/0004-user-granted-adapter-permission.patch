@@ -1,0 +1,652 @@
+diff --git a/chrome/browser/ai/ai_manager.cc b/chrome/browser/ai/ai_manager.cc
+--- a/chrome/browser/ai/ai_manager.cc
++++ b/chrome/browser/ai/ai_manager.cc
+@@ -59,7 +59,12 @@
+ #include "components/policy/core/common/policy_pref_names.h"
+ #include "components/prefs/pref_service.h"
+ #include "content/public/browser/browser_context.h"
++#include "content/public/browser/permission_controller.h"
++#include "content/public/browser/permission_descriptor_util.h"
++#include "content/public/browser/permission_request_description.h"
++#include "content/public/browser/permission_result.h"
+ #include "content/public/browser/render_frame_host.h"
++#include "third_party/blink/public/common/permissions/permission_utils.h"
+ #include "content/public/browser/weak_document_ptr.h"
+ #include "content/public/common/page_visibility_state.h"
+ #include "mojo/public/cpp/base/proto_wrapper.h"
+@@ -379,13 +384,16 @@
+ 
+ // chromium-lora fork: picks the Prompt API use case for `origin` from the
+ // feature config's origin_use_cases, falling back to the default use case.
++// The origin's own use case (its adapter) is used only when the user has
++// granted the AI_ADAPTER permission to that origin.
+ std::optional<std::string> ResolvePromptApiUseCase(
+     const url::Origin& origin,
++    bool adapter_granted,
+     const std::optional<mojo_base::ProtoWrapper>& wrapper) {
+   auto feature_config =
+       ParseFeatureConfig<optimization_guide::proto::PromptApiFeatureConfig>(
+           wrapper);
+-  if (feature_config && !origin.opaque()) {
++  if (feature_config && adapter_granted && !origin.opaque()) {
+     auto it = feature_config->origin_use_cases().find(origin.Serialize());
+     if (it != feature_config->origin_use_cases().end()) {
+       return it->second;
+@@ -778,6 +786,19 @@
+ 
+ AIManager::~AIManager() = default;
+ 
++bool AIManager::IsAdapterGranted() const {
++  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
++  if (!rfh) {
++    return false;
++  }
++  return browser_context_->GetPermissionController()
++             ->GetPermissionStatusForCurrentDocument(
++                 content::PermissionDescriptorUtil::
++                     CreatePermissionDescriptorForPermissionType(
++                         blink::PermissionType::AI_ADAPTER),
++                 rfh) == blink::mojom::PermissionStatus::GRANTED;
++}
++
+ url::Origin AIManager::GetRequestingOrigin() const {
+   content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
+   return rfh ? rfh->GetLastCommittedOrigin() : url::Origin();
+@@ -869,7 +890,8 @@
+         optimization_guide::proto::PromptApiFeatureConfig>(
+         optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+         input_capabilities, std::move(callback),
+-        base::BindOnce(&ResolvePromptApiUseCase, GetRequestingOrigin()));
++        base::BindOnce(&ResolvePromptApiUseCase, GetRequestingOrigin(),
++                       IsAdapterGranted()));
+   } else {
+     CanCreateSession(optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+                      input_capabilities, std::move(callback));
+@@ -925,7 +947,8 @@
+                                       weak_factory_.GetWeakPtr(),
+                                       std::move(client), std::move(options)),
+                        base::BindOnce(&ResolvePromptApiUseCase,
+-                                      GetRequestingOrigin())));
++                                      GetRequestingOrigin(),
++                                      IsAdapterGranted())));
+   } else {
+     if (monitor) {
+       model_broker_client_->AddModelDownloadProgressObserver(
+@@ -1435,10 +1458,10 @@
+       optimization_guide::mojom::OnDeviceFeature::kPromptApi,
+       base::BindOnce(
+           [](base::WeakPtr<AIManager> self, url::Origin origin,
+-             GetLanguageModelParamsCallback callback,
++             bool adapter_granted, GetLanguageModelParamsCallback callback,
+              std::optional<mojo_base::ProtoWrapper> wrapper) {
+             std::optional<std::string> use_case =
+-                ResolvePromptApiUseCase(origin, wrapper);
++                ResolvePromptApiUseCase(origin, adapter_granted, wrapper);
+             if (!self || !self->model_broker_client_ || !use_case ||
+                 use_case->empty()) {
+               std::move(callback).Run(nullptr);
+@@ -1458,7 +1481,32 @@
+                     self, std::move(callback)));
+           },
+           weak_factory_.GetWeakPtr(), GetRequestingOrigin(),
+-          std::move(callback)));
++          IsAdapterGranted(), std::move(callback)));
++}
++
++void AIManager::RequestAdapter(RequestAdapterCallback callback) {
++  content::RenderFrameHost* rfh = rfh_.AsRenderFrameHostIfValid();
++  if (!rfh) {
++    std::move(callback).Run(false);
++    return;
++  }
++  // The prompt needs a user gesture, like other prompting permissions; the
++  // permission system denies a request without one.
++  browser_context_->GetPermissionController()
++      ->RequestPermissionFromCurrentDocument(
++          rfh,
++          content::PermissionRequestDescription(
++              content::PermissionDescriptorUtil::
++                  CreatePermissionDescriptorForPermissionType(
++                      blink::PermissionType::AI_ADAPTER),
++              /*user_gesture=*/rfh->HasTransientUserActivation()),
++          base::BindOnce(
++              [](RequestAdapterCallback callback,
++                 content::PermissionResult result) {
++                std::move(callback).Run(
++                    result.status == blink::mojom::PermissionStatus::GRANTED);
++              },
++              std::move(callback)));
+ }
+ 
+ void AIManager::CanCreateWriter(blink::mojom::AIWriterCreateOptionsPtr options,
+diff --git a/chrome/browser/ai/ai_manager.h b/chrome/browser/ai/ai_manager.h
+--- a/chrome/browser/ai/ai_manager.h
++++ b/chrome/browser/ai/ai_manager.h
+@@ -77,6 +77,11 @@
+   // or an opaque origin when there is no live frame.
+   url::Origin GetRequestingOrigin() const;
+ 
++  // chromium-lora fork: whether the user has allowed this frame's site to
++  // apply its own adapter (the AI_ADAPTER permission). Read through the
++  // PermissionController, so DevTools overrides apply.
++  bool IsAdapterGranted() const;
++
+   void AddReceiver(mojo::PendingReceiver<blink::mojom::AIManager> receiver);
+ 
+   size_t GetContextBoundObjectSetSizeForTesting() {
+@@ -94,6 +99,7 @@
+       mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor)
+       override;
+   void GetLanguageModelParams(GetLanguageModelParamsCallback callback) override;
++  void RequestAdapter(RequestAdapterCallback callback) override;
+   void CanCreateWriter(blink::mojom::AIWriterCreateOptionsPtr options,
+                        CanCreateWriterCallback callback) override;
+   void CreateWriter(
+diff --git a/chrome/browser/permissions/permission_manager_factory.cc b/chrome/browser/permissions/permission_manager_factory.cc
+--- a/chrome/browser/permissions/permission_manager_factory.cc
++++ b/chrome/browser/permissions/permission_manager_factory.cc
+@@ -36,6 +36,7 @@
+ #include "components/permissions/contexts/pointer_lock_permission_context.h"
+ #include "components/permissions/contexts/speaker_selection_permission_context.h"
+ #include "components/permissions/contexts/web_app_installation_permission_context.h"
++#include "components/permissions/contexts/ai_adapter_permission_context.h"
+ #include "components/permissions/contexts/window_management_permission_context.h"
+ #include "components/permissions/permission_manager.h"
+ #include "extensions/buildflags/buildflags.h"
+@@ -193,6 +194,10 @@
+   permission_contexts[ContentSettingsType::WEB_APP_INSTALLATION] =
+       std::make_unique<permissions::WebAppInstallationPermissionContext>(
+           profile);
++
++  // chromium-lora fork.
++  permission_contexts[ContentSettingsType::AI_ADAPTER] =
++      std::make_unique<permissions::AiAdapterPermissionContext>(profile);
+ 
+ #if BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(USE_CUPS)
+   permission_contexts[ContentSettingsType::WEB_PRINTING] =
+diff --git a/chrome/browser/ui/webui/settings/site_settings_helper.cc b/chrome/browser/ui/webui/settings/site_settings_helper.cc
+--- a/chrome/browser/ui/webui/settings/site_settings_helper.cc
++++ b/chrome/browser/ui/webui/settings/site_settings_helper.cc
+@@ -263,6 +263,7 @@
+     {ContentSettingsType::LOCAL_NETWORK_ACCESS, nullptr},
+     {ContentSettingsType::SUB_APPS_WITHOUT_PROMPTS, nullptr},
+     {ContentSettingsType::SUSPICIOUS_SITE_WARNING_DATA, nullptr},
++    {ContentSettingsType::AI_ADAPTER, nullptr},
+ });
+ 
+ static_assert(
+diff --git a/components/content_settings/core/browser/content_settings_registry.cc b/components/content_settings/core/browser/content_settings_registry.cc
+--- a/components/content_settings/core/browser/content_settings_registry.cc
++++ b/components/content_settings/core/browser/content_settings_registry.cc
+@@ -759,6 +759,17 @@
+ 
+   Register(ContentSettingsType::WEB_APP_INSTALLATION, "web-app-installation",
+            CONTENT_SETTING_ASK, WebsiteSettingsInfo::UNSYNCABLE,
++           /*allowlisted_primary_schemes=*/{},
++           /*valid_settings=*/
++           {CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK, CONTENT_SETTING_ASK},
++           WebsiteSettingsInfo::TOP_ORIGIN_ONLY_SCOPE,
++           WebsiteSettingsRegistry::DESKTOP,
++           ContentSettingsInfo::INHERIT_IF_LESS_PERMISSIVE,
++           PermissionSettingsInfo::EXCEPTIONS_ON_SECURE_ORIGINS_ONLY);
++
++  // chromium-lora fork: per-site LoRA adapters for the built-in AI.
++  Register(ContentSettingsType::AI_ADAPTER, "ai-adapter", CONTENT_SETTING_ASK,
++           WebsiteSettingsInfo::UNSYNCABLE,
+            /*allowlisted_primary_schemes=*/{},
+            /*valid_settings=*/
+            {CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK, CONTENT_SETTING_ASK},
+diff --git a/components/content_settings/core/common/content_settings_types.mojom b/components/content_settings/core/common/content_settings_types.mojom
+--- a/components/content_settings/core/common/content_settings_types.mojom
++++ b/components/content_settings/core/common/content_settings_types.mojom
+@@ -493,5 +493,12 @@
+ 
+   // Stores allowlist decisions for Suspicious Site Warnings.
+   SUSPICIOUS_SITE_WARNING_DATA,
++
++  // chromium-lora fork: whether a site may apply its own LoRA adapter to the
++  // built-in AI model on that site. The user grants it through a prompt.
++  // - ALLOW: the site's adapter is used for its Prompt API sessions.
++  // - BLOCK: the site gets the base model, and may not ask again.
++  // - ASK (default): the site gets the base model until it asks.
++  AI_ADAPTER,
+ };
+ // LINT.ThenChange(//components/content_settings/core/common/content_settings_uma_constants.h:kContentSettingsTypeToHistogramValue)
+diff --git a/components/content_settings/core/common/content_settings_uma_constants.h b/components/content_settings/core/common/content_settings_uma_constants.h
+--- a/components/content_settings/core/common/content_settings_uma_constants.h
++++ b/components/content_settings/core/common/content_settings_uma_constants.h
+@@ -169,6 +169,7 @@
+         {ContentSettingsType::SUB_APPS_WITHOUT_PROMPTS, 145},
+         {ContentSettingsType::INLINE_CUE_MENU, 146},
+         {ContentSettingsType::SUSPICIOUS_SITE_WARNING_DATA, 147},
++        {ContentSettingsType::AI_ADAPTER, 148},
+ 
+         // As mentioned at the top, please don't forget to update ContentType in
+         // enums.xml when you add entries here!
+diff --git a/components/permissions/BUILD.gn b/components/permissions/BUILD.gn
+--- a/components/permissions/BUILD.gn
++++ b/components/permissions/BUILD.gn
+@@ -71,6 +71,8 @@
+     "contexts/wake_lock_permission_context.h",
+     "contexts/web_app_installation_permission_context.cc",
+     "contexts/web_app_installation_permission_context.h",
++    "contexts/ai_adapter_permission_context.cc",
++    "contexts/ai_adapter_permission_context.h",
+     "contexts/webxr_permission_context.cc",
+     "contexts/webxr_permission_context.h",
+     "contexts/window_management_permission_context.cc",
+diff --git a/components/permissions/permission_request.cc b/components/permissions/permission_request.cc
+--- a/components/permissions/permission_request.cc
++++ b/components/permissions/permission_request.cc
+@@ -470,6 +470,9 @@
+     case RequestType::kWebAppInstallation:
+       message_id = IDS_WEB_APP_INSTALLATION_PERMISSION_FRAGMENT;
+       break;
++    case RequestType::kAiAdapter:
++      message_id = IDS_AI_ADAPTER_PERMISSION_FRAGMENT;
++      break;
+ #if BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(USE_CUPS)
+     case RequestType::kWebPrinting:
+       message_id = IDS_WEB_PRINTING_PERMISSION_FRAGMENT;
+diff --git a/components/permissions/permission_uma_constants.h b/components/permissions/permission_uma_constants.h
+--- a/components/permissions/permission_uma_constants.h
++++ b/components/permissions/permission_uma_constants.h
+@@ -95,6 +95,8 @@
+   PERMISSION_GEOLOCATION_APPROXIMATE_OR_PRECISE = 46,
+   PERMISSION_GEOLOCATION_APPROXIMATE = 47,
+   PERMISSION_GEOLOCATION_UPGRADE = 48,
++  // chromium-lora fork.
++  PERMISSION_AI_ADAPTER = 49,
+   // NUM must be the last value in the enum.
+   NUM,
+ };
+diff --git a/components/permissions/permission_uma_util.cc b/components/permissions/permission_uma_util.cc
+--- a/components/permissions/permission_uma_util.cc
++++ b/components/permissions/permission_uma_util.cc
+@@ -180,6 +180,8 @@
+       return "KeyboardAndPointerLock";
+     case RequestTypeForUma::PERMISSION_WEB_APP_INSTALLATION:
+       return "WebAppInstallation";
++    case RequestTypeForUma::PERMISSION_AI_ADAPTER:
++      return "AiAdapter";
+     case RequestTypeForUma::PERMISSION_LOCAL_NETWORK:
+       return "LocalNetwork";
+     case RequestTypeForUma::PERMISSION_LOOPBACK_NETWORK:
+@@ -695,6 +697,8 @@
+       return "KeyboardLock";
+     case ContentSettingsType::WEB_APP_INSTALLATION:
+       return "WebAppInstallation";
++    case ContentSettingsType::AI_ADAPTER:
++      return "AiAdapter";
+     case ContentSettingsType::LOCAL_NETWORK_ACCESS:
+       return "LocalNetworkAccess";
+     case ContentSettingsType::LOCAL_NETWORK:
+diff --git a/components/permissions/permission_util.cc b/components/permissions/permission_util.cc
+--- a/components/permissions/permission_util.cc
++++ b/components/permissions/permission_util.cc
+@@ -222,6 +222,8 @@
+       return RequestTypeForUma::CAPTURED_SURFACE_CONTROL;
+     case RequestType::kWebAppInstallation:
+       return RequestTypeForUma::PERMISSION_WEB_APP_INSTALLATION;
++    case RequestType::kAiAdapter:
++      return RequestTypeForUma::PERMISSION_AI_ADAPTER;
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+     case RequestType::kIdentityProvider:
+       return RequestTypeForUma::PERMISSION_IDENTITY_PROVIDER;
+@@ -370,6 +372,9 @@
+       break;
+     case ContentSettingsType::WEB_APP_INSTALLATION:
+       *out = PermissionType::WEB_APP_INSTALLATION;
++      break;
++    case ContentSettingsType::AI_ADAPTER:
++      *out = PermissionType::AI_ADAPTER;
+       break;
+     case ContentSettingsType::LOCAL_NETWORK_ACCESS:
+       *out = PermissionType::LOCAL_NETWORK_ACCESS;
+@@ -578,6 +583,8 @@
+       return ContentSettingsType::AUTOMATIC_FULLSCREEN;
+     case PermissionType::WEB_APP_INSTALLATION:
+       return ContentSettingsType::WEB_APP_INSTALLATION;
++    case PermissionType::AI_ADAPTER:
++      return ContentSettingsType::AI_ADAPTER;
+     case PermissionType::LOCAL_NETWORK_ACCESS:
+       return ContentSettingsType::LOCAL_NETWORK_ACCESS;
+     case PermissionType::LOCAL_NETWORK:
+diff --git a/components/permissions/request_type.cc b/components/permissions/request_type.cc
+--- a/components/permissions/request_type.cc
++++ b/components/permissions/request_type.cc
+@@ -177,6 +177,8 @@
+       return ::features::IsRoundedIconsEnabled()
+                  ? vector_icons::kInstallDesktopIcon
+                  : vector_icons::kInstallDesktopOldIcon;
++    case RequestType::kAiAdapter:
++      return vector_icons::kChatSparkIcon;
+ #if BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(USE_CUPS)
+     case RequestType::kWebPrinting:
+       return ::features::IsRoundedIconsEnabled()
+@@ -277,6 +279,8 @@
+                  : vector_icons::kPointerLockOffOldIcon;
+     case RequestType::kWebAppInstallation:
+       return vector_icons::kInstallDesktopOffCustomIcon;
++    case RequestType::kAiAdapter:
++      return vector_icons::kChatSparkIcon;
+     default:
+       NOTREACHED();
+   }
+@@ -368,6 +372,8 @@
+ #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+     case ContentSettingsType::WEB_APP_INSTALLATION:
+       return RequestType::kWebAppInstallation;
++    case ContentSettingsType::AI_ADAPTER:
++      return RequestType::kAiAdapter;
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+   }
+ }
+@@ -454,6 +460,8 @@
+ #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+     case RequestType::kWebAppInstallation:
+       return ContentSettingsType::WEB_APP_INSTALLATION;
++    case RequestType::kAiAdapter:
++      return ContentSettingsType::AI_ADAPTER;
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+       // Not associated with a ContentSettingsType.
+     case RequestType::kDiskQuota:
+@@ -584,6 +592,8 @@
+ #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+     case permissions::RequestType::kWebAppInstallation:
+       return "web_app_installation";
++    case permissions::RequestType::kAiAdapter:
++      return "ai_adapter";
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+     case permissions::RequestType::kWindowManagement:
+       return "window_management";
+diff --git a/components/permissions/request_type.h b/components/permissions/request_type.h
+--- a/components/permissions/request_type.h
++++ b/components/permissions/request_type.h
+@@ -66,6 +66,8 @@
+   kVrSession,
+ #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+   kWebAppInstallation,
++  // chromium-lora fork: a site's own LoRA adapter for the built-in AI.
++  kAiAdapter,
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+ #if BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(USE_CUPS)
+   kWebPrinting,
+diff --git a/components/permissions_strings.grdp b/components/permissions_strings.grdp
+--- a/components/permissions_strings.grdp
++++ b/components/permissions_strings.grdp
+@@ -224,6 +224,9 @@
+   </message>
+   <message name="IDS_WEB_APP_INSTALLATION_PERMISSION_FRAGMENT" desc="Permission fragment shown in the permissions bubble when a web page requests to install a web app.">
+     Be able to install web apps
++  </message>
++  <message name="IDS_AI_ADAPTER_PERMISSION_FRAGMENT" desc="chromium-lora fork: permission fragment shown when a site asks to apply its own training to the built-in AI on that site.">
++    Change how the built-in AI answers on this site, using the site's own training. Allow only sites you trust.
+   </message>
+   <message name="IDS_LOCAL_NETWORK_PERMISSION_FRAGMENT" desc="Permission fragment shown in the permissions bubble when a web page requests to access other devices on the user's local network.">
+     Access other devices on your local network
+diff --git a/content/browser/ai/echo_ai_manager_impl.cc b/content/browser/ai/echo_ai_manager_impl.cc
+--- a/content/browser/ai/echo_ai_manager_impl.cc
++++ b/content/browser/ai/echo_ai_manager_impl.cc
+@@ -259,6 +259,11 @@
+       /*model_version=*/std::nullopt));
+ }
+ 
++// The echo implementation has no adapters.
++void EchoAIManagerImpl::RequestAdapter(RequestAdapterCallback callback) {
++  std::move(callback).Run(false);
++}
++
+ void EchoAIManagerImpl::CanCreateWriter(
+     blink::mojom::AIWriterCreateOptionsPtr options,
+     CanCreateWriterCallback callback) {
+diff --git a/content/browser/ai/echo_ai_manager_impl.h b/content/browser/ai/echo_ai_manager_impl.h
+--- a/content/browser/ai/echo_ai_manager_impl.h
++++ b/content/browser/ai/echo_ai_manager_impl.h
+@@ -59,6 +59,7 @@
+       mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor)
+       override;
+   void GetLanguageModelParams(GetLanguageModelParamsCallback callback) override;
++  void RequestAdapter(RequestAdapterCallback callback) override;
+   void CanCreateWriter(blink::mojom::AIWriterCreateOptionsPtr options,
+                        CanCreateWriterCallback callback) override;
+   void CreateWriter(
+diff --git a/content/browser/devtools/protocol/browser_handler.cc b/content/browser/devtools/protocol/browser_handler.cc
+--- a/content/browser/devtools/protocol/browser_handler.cc
++++ b/content/browser/devtools/protocol/browser_handler.cc
+@@ -230,6 +230,8 @@
+     *permission_type = PermissionType::AUTOMATIC_FULLSCREEN;
+   } else if (name == "web-app-installation") {
+     *permission_type = PermissionType::WEB_APP_INSTALLATION;
++  } else if (name == "ai-adapter") {  // chromium-lora fork
++    *permission_type = PermissionType::AI_ADAPTER;
+   } else if (name == "local-network-access") {
+     *permission_type = PermissionType::LOCAL_NETWORK_ACCESS;
+   } else if (name == "local-network") {
+diff --git a/content/browser/permissions/permission_controller_impl.cc b/content/browser/permissions/permission_controller_impl.cc
+--- a/content/browser/permissions/permission_controller_impl.cc
++++ b/content/browser/permissions/permission_controller_impl.cc
+@@ -95,6 +95,7 @@
+     case PermissionType::POINTER_LOCK:
+     case PermissionType::AUTOMATIC_FULLSCREEN:
+     case PermissionType::WEB_APP_INSTALLATION:
++    case PermissionType::AI_ADAPTER:
+     case PermissionType::LOCAL_NETWORK_ACCESS:
+     case PermissionType::LOCAL_NETWORK:
+     case PermissionType::LOOPBACK_NETWORK:
+diff --git a/content/browser/permissions/permission_descriptor_util.cc b/content/browser/permissions/permission_descriptor_util.cc
+--- a/content/browser/permissions/permission_descriptor_util.cc
++++ b/content/browser/permissions/permission_descriptor_util.cc
+@@ -171,6 +171,9 @@
+     case blink::PermissionType::WEB_APP_INSTALLATION:
+       return CreatePermissionDescriptor(
+           blink::mojom::PermissionName::WEB_APP_INSTALLATION);
++    case blink::PermissionType::AI_ADAPTER:
++      return CreatePermissionDescriptor(
++          blink::mojom::PermissionName::AI_ADAPTER);
+     case blink::PermissionType::LOCAL_NETWORK_ACCESS:
+       return CreatePermissionDescriptor(
+           blink::mojom::PermissionName::LOCAL_NETWORK_ACCESS);
+diff --git a/third_party/blink/common/permissions/permission_utils.cc b/third_party/blink/common/permissions/permission_utils.cc
+--- a/third_party/blink/common/permissions/permission_utils.cc
++++ b/third_party/blink/common/permissions/permission_utils.cc
+@@ -104,6 +104,8 @@
+       return "AutomaticFullscreen";
+     case PermissionType::WEB_APP_INSTALLATION:
+       return "WebAppInstallation";
++    case PermissionType::AI_ADAPTER:
++      return "AiAdapter";
+     case PermissionType::LOCAL_NETWORK_ACCESS:
+       return "LocalNetworkAccess";
+     case PermissionType::LOCAL_NETWORK:
+@@ -170,6 +172,8 @@
+       return network::mojom::PermissionsPolicyFeature::kFullscreen;
+     case PermissionType::WEB_APP_INSTALLATION:
+       return network::mojom::PermissionsPolicyFeature::kWebAppInstallation;
++    case PermissionType::AI_ADAPTER:
++      return network::mojom::PermissionsPolicyFeature::kLanguageModel;
+     case PermissionType::LOCAL_NETWORK_ACCESS:
+       return network::mojom::PermissionsPolicyFeature::kLocalNetworkAccess;
+     case PermissionType::LOCAL_NETWORK:
+@@ -352,6 +356,8 @@
+       return std::nullopt;
+     case PermissionName::WEB_APP_INSTALLATION:
+       return PermissionType::WEB_APP_INSTALLATION;
++    case PermissionName::AI_ADAPTER:
++      return PermissionType::AI_ADAPTER;
+     case PermissionName::LOCAL_NETWORK_ACCESS:
+       return PermissionType::LOCAL_NETWORK_ACCESS;
+     case PermissionName::LOCAL_NETWORK:
+diff --git a/third_party/blink/public/common/permissions/permission_utils.h b/third_party/blink/public/common/permissions/permission_utils.h
+--- a/third_party/blink/public/common/permissions/permission_utils.h
++++ b/third_party/blink/public/common/permissions/permission_utils.h
+@@ -69,6 +69,8 @@
+   LOCAL_NETWORK = 44,
+   LOOPBACK_NETWORK = 45,
+   GEOLOCATION_APPROXIMATE = 46,
++  // chromium-lora fork: a site's own LoRA adapter for the built-in AI.
++  AI_ADAPTER = 47,
+ 
+   // Always keep this at the end.
+   NUM,
+diff --git a/third_party/blink/public/mojom/ai/ai_manager.mojom b/third_party/blink/public/mojom/ai/ai_manager.mojom
+--- a/third_party/blink/public/mojom/ai/ai_manager.mojom
++++ b/third_party/blink/public/mojom/ai/ai_manager.mojom
+@@ -173,6 +173,10 @@
+   GetLanguageModelParams() => (
+     AILanguageModelParams? language_model_params
+   );
++  // chromium-lora fork: asks the user whether this site may apply its own
++  // LoRA adapter to the built-in AI. Shows a permission prompt unless the
++  // user already decided. Returns whether the permission is granted.
++  RequestAdapter() => (bool granted);
+   // Returns writer model availability info from the underlying service.
+   CanCreateWriter(AIWriterCreateOptions options) =>
+       (ModelAvailabilityCheckResult result);
+diff --git a/third_party/blink/public/mojom/permissions/permission.mojom b/third_party/blink/public/mojom/permissions/permission.mojom
+--- a/third_party/blink/public/mojom/permissions/permission.mojom
++++ b/third_party/blink/public/mojom/permissions/permission.mojom
+@@ -47,6 +47,8 @@
+   WEB_PRINTING,
+   SMART_CARD,
+   GEOLOCATION_APPROXIMATE,
++  // chromium-lora fork: a site's own LoRA adapter for the built-in AI.
++  AI_ADAPTER,
+ };
+ 
+ struct MidiPermissionDescriptor {
+diff --git a/third_party/blink/renderer/modules/ai/language_model.cc b/third_party/blink/renderer/modules/ai/language_model.cc
+--- a/third_party/blink/renderer/modules/ai/language_model.cc
++++ b/third_party/blink/renderer/modules/ai/language_model.cc
+@@ -721,6 +721,29 @@
+   return promise;
+ }
+ 
++// chromium-lora fork: asks the browser to prompt the user for the
++// AI_ADAPTER permission on this site.
++ScriptPromise<IDLBoolean> LanguageModel::requestAdapter(
++    ScriptState* script_state,
++    ExceptionState& exception_state) {
++  if (!script_state->ContextIsValid()) {
++    ThrowInvalidContextException(exception_state);
++    return EmptyPromise();
++  }
++  auto* resolver =
++      MakeGarbageCollected<ScriptPromiseResolver<IDLBoolean>>(script_state);
++  auto promise = resolver->Promise();
++  HeapMojoRemote<mojom::blink::AIManager>& ai_manager_remote =
++      AIInterfaceProxy::GetAIManagerRemote(
++          ExecutionContext::From(script_state));
++  ai_manager_remote->RequestAdapter(BindOnce(
++      [](ScriptPromiseResolver<IDLBoolean>* resolver, bool granted) {
++        resolver->Resolve(granted);
++      },
++      WrapPersistent(resolver)));
++  return promise;
++}
++
+ ScriptPromise<V8LanguageModelPromptResult> LanguageModel::prompt(
+     ScriptState* script_state,
+     const V8LanguageModelPrompt* input,
+diff --git a/third_party/blink/renderer/modules/ai/language_model.h b/third_party/blink/renderer/modules/ai/language_model.h
+--- a/third_party/blink/renderer/modules/ai/language_model.h
++++ b/third_party/blink/renderer/modules/ai/language_model.h
+@@ -73,6 +73,10 @@
+       LanguageModelCreateCoreOptions* options,
+       ExceptionState& exception_state);
+   static ScriptPromise<IDLNullable<LanguageModelParams>> params(
++      ScriptState* script_state,
++      ExceptionState& exception_state);
++  // chromium-lora fork.
++  static ScriptPromise<IDLBoolean> requestAdapter(
+       ScriptState* script_state,
+       ExceptionState& exception_state);
+ 
+diff --git a/third_party/blink/renderer/modules/ai/language_model.idl b/third_party/blink/renderer/modules/ai/language_model.idl
+--- a/third_party/blink/renderer/modules/ai/language_model.idl
++++ b/third_party/blink/renderer/modules/ai/language_model.idl
+@@ -49,6 +49,15 @@
+     RaisesException
+   ]
+   static Promise<LanguageModelParams?> params();
++
++  // chromium-lora fork: asks the user whether this site may apply its own
++  // adapter to the built-in AI. Needs a user gesture. Resolves to whether the
++  // permission is granted; once granted, new sessions on this site use it.
++  [
++    CallWith=ScriptState,
++    RaisesException
++  ]
++  static Promise<boolean> requestAdapter();
+ 
+   [
+     MeasureAs=LanguageModel_Prompt,
+diff --git a/third_party/blink/renderer/modules/permissions/permission_utils.cc b/third_party/blink/renderer/modules/permissions/permission_utils.cc
+--- a/third_party/blink/renderer/modules/permissions/permission_utils.cc
++++ b/third_party/blink/renderer/modules/permissions/permission_utils.cc
+@@ -149,6 +149,8 @@
+       return "fullscreen";
+     case PermissionName::WEB_APP_INSTALLATION:
+       return "web-app-installation";
++    case PermissionName::AI_ADAPTER:
++      return "ai-adapter";
+     case PermissionName::LOCAL_NETWORK_ACCESS:
+       return "local-network-access";
+     case PermissionName::LOCAL_NETWORK:
+diff --git a/components/permissions/contexts/ai_adapter_permission_context.h b/components/permissions/contexts/ai_adapter_permission_context.h
+new file mode 100644
+--- /dev/null
++++ b/components/permissions/contexts/ai_adapter_permission_context.h
+@@ -0,0 +1,28 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_PERMISSIONS_CONTEXTS_AI_ADAPTER_PERMISSION_CONTEXT_H_
++#define COMPONENTS_PERMISSIONS_CONTEXTS_AI_ADAPTER_PERMISSION_CONTEXT_H_
++
++#include "components/permissions/content_setting_permission_context_base.h"
++
++namespace permissions {
++
++// chromium-lora fork: whether a site may apply its own LoRA adapter to the
++// built-in AI on that site. Stored per top-level origin; the user decides
++// through a permission prompt.
++class AiAdapterPermissionContext
++    : public permissions::ContentSettingPermissionContextBase {
++ public:
++  explicit AiAdapterPermissionContext(content::BrowserContext* browser_context);
++  ~AiAdapterPermissionContext() override = default;
++
++  AiAdapterPermissionContext(const AiAdapterPermissionContext&) = delete;
++  AiAdapterPermissionContext& operator=(const AiAdapterPermissionContext&) =
++      delete;
++};
++
++}  // namespace permissions
++
++#endif  // COMPONENTS_PERMISSIONS_CONTEXTS_AI_ADAPTER_PERMISSION_CONTEXT_H_
+diff --git a/components/permissions/contexts/ai_adapter_permission_context.cc b/components/permissions/contexts/ai_adapter_permission_context.cc
+new file mode 100644
+--- /dev/null
++++ b/components/permissions/contexts/ai_adapter_permission_context.cc
+@@ -0,0 +1,19 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/permissions/contexts/ai_adapter_permission_context.h"
++
++#include "components/content_settings/core/common/content_settings_types.h"
++#include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
++
++namespace permissions {
++
++AiAdapterPermissionContext::AiAdapterPermissionContext(
++    content::BrowserContext* browser_context)
++    : ContentSettingPermissionContextBase(
++          browser_context,
++          ContentSettingsType::AI_ADAPTER,
++          network::mojom::PermissionsPolicyFeature::kLanguageModel) {}
++
++}  // namespace permissions

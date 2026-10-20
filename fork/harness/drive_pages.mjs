@@ -4,13 +4,20 @@
 // the page sees, availability, any create() error, and the answers.
 //
 // Usage: drive_pages.mjs <cdp-port> <questions.json> <url> [<url> ...]
-// questions.json: {"system": "...", "questions": [{"label": "...", "q": "..."}, ...]}
+// questions.json: {"system": "...", "questions": [{"label": "...", "q": "..."}, ...],
+//                  "adapter_permission": {"<origin>": "granted" | "denied", ...},
+//                  "request_adapter": ["<origin>", ...]}
+// adapter_permission sets the ai-adapter permission through DevTools before the
+// pages load (Browser.setPermission), standing in for the user's answer to the
+// prompt. request_adapter makes those pages call LanguageModel.requestAdapter()
+// and record its result.
 
 import { readFileSync } from "node:fs";
 
 const [port, questionsPath, ...urls] = process.argv.slice(2);
 // The evaluation file's system prompt, which the adapters' recipes train with.
-const { system, questions } = JSON.parse(readFileSync(questionsPath, "utf8"));
+const { system, questions, adapter_permission = {}, request_adapter = [] } =
+  JSON.parse(readFileSync(questionsPath, "utf8"));
 const deadline = () => Date.now() + 300000;
 
 // The first launch after a rebuild loads many fresh component libraries, so
@@ -57,8 +64,26 @@ async function cdp(url) {
   return { ws, evaluate };
 }
 
-const page = (qs) => `(async () => {
+// Sends one DevTools command on the browser target.
+async function browserCommand(method, params) {
+  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+  const ws = new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise((resolve) => ws.addEventListener("open", resolve, { once: true }));
+  const reply = await new Promise((resolve) => {
+    ws.addEventListener("message", (e) => resolve(JSON.parse(e.data)), { once: true });
+    ws.send(JSON.stringify({ id: 1, method, params }));
+  });
+  ws.close();
+  if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+  return reply.result;
+}
+
+const page = (qs, request) => `(async () => {
   const out = { origin: location.origin, secure: self.isSecureContext };
+  if (${request}) {
+    try { out.requestAdapter = await LanguageModel.requestAdapter(); }
+    catch (e) { out.requestAdapter = String(e); }
+  }
   if (!("LanguageModel" in self)) return { ...out, error: "LanguageModel not exposed" };
   let availability = await LanguageModel.availability();
   for (let i = 0; i < 30 && availability === "unavailable"; i++) {
@@ -94,10 +119,15 @@ const page = (qs) => `(async () => {
 })()`;
 
 await waitForDevtools();
+for (const [origin, setting] of Object.entries(adapter_permission)) {
+  await browserCommand("Browser.setPermission",
+    { permission: { name: "ai-adapter" }, setting, origin });
+}
 for (const url of urls) {
   const { ws, evaluate } = await cdp(url);
   try {
-    console.log(JSON.stringify(await evaluate(page(questions))));
+    const request = request_adapter.includes(new URL(url).origin);
+    console.log(JSON.stringify(await evaluate(page(questions, request))));
   } catch (e) {
     console.log(JSON.stringify({ url, error: String(e) }));
   } finally {
