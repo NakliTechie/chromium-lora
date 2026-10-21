@@ -50,21 +50,39 @@ m2/ m3/ m4/ m5/ the checks
 tools/          tag_adapter.py: stamps an adapter with the model version it was built for
 ```
 
-Outside this directory the fork needs only public software: the Chromium source at the tag above,
-llama.cpp at tag `b9830`, the Gemma 4 checkpoints, and the Python packages pinned in
-`pipeline/requirements.txt` (training, MLX) and `pipeline/requirements-convert.txt` (conversion,
-llama.cpp's own pins plus `transformers` 5.5.4).
+Outside this directory the fork needs only public software:
+- the Chromium source at the tag above, with its own build tools;
+- llama.cpp at tag `b9830`, CMake and Xcode's command-line tools;
+- the Gemma 4 checkpoints from Hugging Face, after accepting Google's Gemma terms there;
+- Python 3.12 and the packages pinned in `pipeline/requirements.txt` (training, MLX) and
+  `pipeline/requirements-convert.txt` (conversion, llama.cpp's own pins plus `transformers` 5.5.4);
+- Node.js 22 or later, which the page drivers in `harness/` run on.
 
 ## Build
 
 ```bash
-python3 -m venv fork/pipeline/.venv && fork/pipeline/.venv/bin/pip install -r fork/pipeline/requirements.txt
+python3.12 -m venv fork/pipeline/.venv && fork/pipeline/.venv/bin/pip install -r fork/pipeline/requirements.txt
 python3.12 -m venv fork/pipeline/.venv-convert && fork/pipeline/.venv-convert/bin/pip install -r fork/pipeline/requirements-convert.txt
-fork/backend/build-llama.sh <llama.cpp checkout at b9830>          # dylibs, llama-quantize, llama-completion
-python3 fork/pipeline/build_base.py <hf>/gemma-4-E4B-it <llama.cpp> <models>/gemma-4-e4b/q4_k_m/model.gguf Q4_K_M
+git clone --depth 1 --branch b9830 https://github.com/ggml-org/llama.cpp.git <llama.cpp>
+fork/backend/build-llama.sh <llama.cpp>                            # dylibs, llama-quantize, llama-completion
+fork/backend/build-standalone.sh <llama.cpp> <out>                 # the backend and m1_test, outside Chromium
+fork/pipeline/.venv-convert/bin/python fork/pipeline/build_base.py <hf>/gemma-4-E4B-it <llama.cpp> <models>/gemma-4-e4b/q4_k_m/model.gguf Q4_K_M
 fork/apply.sh <chromium/src> <llama.cpp> <chromium/src>/out/Default
 autoninja -C out/Default chrome                                    # from chromium/src
 ```
+
+Run the checks under **Results** with `fork/pipeline/.venv-convert/bin/python` (`$PY` there),
+which has numpy and transformers.
+
+A fresh-clone test on 2026-10-22 covered these steps:
+- both requirement files resolved in a new Python 3.12 environment, without installing;
+- llama.cpp `b9830` cloned and built with `build-llama.sh`;
+- the backend built with `build-standalone.sh`, and M1 passed 5 of 5 with an existing adapter;
+- the four patches applied in order to the unmodified Chromium `155.0.8059.84` files, and the
+  result matched the built tree in all 40 files.
+
+Not covered: installing the full Python environments, training an adapter from them, and fetching
+and building Chromium from scratch (about 100 GB and several hours).
 
 `apply.sh` changes the tree in six places:
 
@@ -216,23 +234,24 @@ A cloned session continued identically, a cancelled generation stopped, and an a
 another model was refused.
 
 ```bash
-python3 fork/m4/m4_check.py <chromium/src> <out> <llama.cpp> <models.json> fork/recipes/five-facts.json \
+PY=fork/pipeline/.venv-convert/bin/python
+$PY fork/m4/m4_check.py <chromium/src> <out> <llama.cpp> <models.json> fork/recipes/five-facts.json \
   fork/eval/five-facts.json <state dir> /tmp/m4-work      # add N or N:stale|build|browse to run one step
-python3 fork/m5/m5_check.py <chromium/src> <out> <model dir> <base.gguf> <adapter.gguf> \
+$PY fork/m5/m5_check.py <chromium/src> <out> <model dir> <base.gguf> <adapter.gguf> \
   fork/eval/five-facts.json /tmp/m5-work
-python3 fork/m5/lifecycle_check.py <chromium/src> <out> <model dir> <base.gguf> <adapter.gguf> \
+$PY fork/m5/lifecycle_check.py <chromium/src> <out> <model dir> <base.gguf> <adapter.gguf> \
   fork/eval/five-facts.json /tmp/lifecycle-work
-python3 fork/m5/review_check.py <chromium/src> <out> <llama.cpp> <base.gguf> <hf dir> 4 \
+$PY fork/m5/review_check.py <chromium/src> <out> <llama.cpp> <base.gguf> <hf dir> 4 \
   fork/eval/five-facts.json <state dir> /tmp/review-work build    # then: ... browse
-python3 fork/m3/m3_check.py <chromium/src> <out> <llama.cpp> <model dir> <base.gguf> <adapter.gguf> \
+$PY fork/m3/m3_check.py <chromium/src> <out> <llama.cpp> <model dir> <base.gguf> <adapter.gguf> \
   fork/eval/five-facts.json /tmp/m3-work
-python3 fork/m5/prompt_baseline_check.py <out> <model dir> <base.gguf> <hf dir> <chromium/src> \
+$PY fork/m5/prompt_baseline_check.py <out> <model dir> <base.gguf> <hf dir> <chromium/src> \
   fork/recipes/five-facts.json fork/eval/five-facts.json /tmp/baseline-work
-python3 fork/m5/docs_check.py <m1_test> <library> <base.gguf> <docs adapter.gguf> <hf dir> <docs.md> \
+$PY fork/m5/docs_check.py <m1_test> <library> <base.gguf> <docs adapter.gguf> <hf dir> <docs.md> \
   fork/eval/fork-docs.json /tmp/docs-report.json
-python3 fork/backend/test/m1_check.py <m1_test> <library> <base.gguf> <adapter.gguf> \
+$PY fork/backend/test/m1_check.py <m1_test> <library> <base.gguf> <adapter.gguf> \
   fork/eval/five-facts.json <llama.cpp> /tmp/m1-report.json
-python3 fork/pipeline/test_builder.py
+$PY fork/pipeline/test_builder.py
 ```
 
 ## Known limits
