@@ -53,7 +53,7 @@ tools/          tag_adapter.py: stamps an adapter with the model version it was 
 Outside this directory the fork needs only public software:
 - the Chromium source at the tag above, with its own build tools;
 - llama.cpp at tag `b9830`, CMake and Xcode's command-line tools;
-- the Gemma 4 checkpoints from Hugging Face, after accepting Google's Gemma terms there;
+- the Gemma 4 checkpoints from Hugging Face (Apache-2.0, no sign-in needed);
 - Python 3.12 and the packages pinned in `pipeline/requirements.txt` (training, MLX) and
   `pipeline/requirements-convert.txt` (conversion, llama.cpp's own pins plus `transformers` 5.5.4);
 - Node.js 22 or later, which the page drivers in `harness/` run on.
