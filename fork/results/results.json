@@ -1,0 +1,23 @@
+{
+ "measured": "2026-10-20",
+ "model": "Gemma 4 E4B Q4_K_M",
+ "metric": "held-out questions answered with the expected fact, of 30",
+ "recipes": [
+  {
+   "name": "Five facts",
+   "recipe": "fork/recipes/five-facts.json",
+   "eval": "fork/eval/five-facts.json",
+   "arms": {"no adapter": 0, "facts in the prompt": 22, "site adapter": 30},
+   "extra_prompt_tokens": {"facts in the prompt": 53},
+   "commands": ["fork/m3/m3_check.py", "fork/m5/prompt_baseline_check.py"]
+  },
+  {
+   "name": "Documentation page",
+   "recipe": "fork/recipes/fork-docs.json",
+   "eval": "fork/eval/fork-docs.json",
+   "arms": {"no adapter": 2, "facts in the prompt": 29, "site adapter": 6},
+   "extra_prompt_tokens": {"facts in the prompt": 3366},
+   "commands": ["fork/m5/docs_check.py"]
+  }
+ ]
+}

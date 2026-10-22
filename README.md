@@ -1,218 +1,120 @@
-# Per-site LoRA adapters on LiteRT-LM
+<h1 align="center">chromium-lora</h1>
 
-Research into serving a different LoRA adapter per website from one loaded model, and the two
-things that currently block it in Chromium's built-in AI stack.
+<p align="center"><b>A Chromium fork in which Chrome's own Prompt API runs Gemma 4 locally and gives each
+website its own LoRA adapter, granted by the user and pinned to the model version.</b></p>
 
-Everything here uses public material only: the `litert-lm` wheel from PyPI, public model files on
-Hugging Face, and Chromium's own `components/optimization_guide/proto/manifest.proto`. No patched
-browser and no private build is required to reproduce any of it.
+<p align="center">Research build. Chromium 155, macOS on Apple Silicon. Everything runs on your Mac; no account, no server, no telemetry.</p>
 
-## What you would actually run
+<p align="center">
+<img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-2a78d6?style=flat-square">
+<img alt="Chromium 155.0.8059.84" src="https://img.shields.io/badge/chromium-155.0.8059.84-2a78d6?style=flat-square">
+<img alt="Platform: macOS arm64" src="https://img.shields.io/badge/platform-macOS%20arm64-2a78d6?style=flat-square">
+<img alt="Status: research" src="https://img.shields.io/badge/status-research-2a78d6?style=flat-square">
+</p>
 
-**You do not need to compile Chromium.** Nobody has to. Start here if you only want to check the
-central claim:
+## Install
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install litert-lm    # one wheel from PyPI
-mkdir -p models && curl -L -o models/gemma-4-E2B-it-gpu.litertlm \
-  https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm
-
-.venv/bin/python tools/artisan_test.py models/gemma-4-E2B-it-gpu.litertlm 16
-```
-
-That is a 2 GB download and a few minutes on an Apple Silicon Mac. It prints the selected backend,
-whether the LoRA rank was honoured, and the model's answer. No browser of any kind.
-
-Then decide what you need:
-
-| If you want to… | What it costs |
+| What you want to see | What it takes |
 |---|---|
-| Read the two asks | Nothing. [`docs/ask-chromium.md`](docs/ask-chromium.md) |
-| Check the engine claims above | `pip install litert-lm` + a 2 GB public model |
-| See per-origin adapters dispatch | The same, plus a local server and any Chrome/Chromium binary |
-| Reproduce the Chrome-side negative result | A Chromium **checkout** for `manifest.proto` and `protoc` |
-
-The last row is the only thing that touches Chromium at all, and it needs the source tree — not a
-build of it. It exists to reproduce one negative result, and that result was retracted twice on the
-way to being stated correctly, so treat it as the weakest material here. Everything else stands on
-engine output you can re-run yourself.
-
-## The short version
-
-LiteRT-LM can do this already:
-
-```
-one loaded engine  →  N conversations  →  each with its own lora_path
-```
-
-One copy of the weights in memory, N adapters, selected per session. That is the shape a per-site
-product needs, and it exists today in a public package.
-
-Two things stop it being useful:
-
-1. **We could not produce a valid adapter file.** The format is mostly recoverable from the
-   published binary, but it appears to need more than the metadata protobuf — an embedded TFLite
-   model is our best guess, and we could not work out what that half contains or how a third party
-   emits it. Two attempts to derive one both failed, and we found no public example. See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 1.
-2. **Chromium has nowhere to put the caller's identity.** `ModelSubscriptionOptions` carries only
-   `use_case`, so every caller on a device asking for the same use case gets the same solution.
-   See [`docs/ask-chromium.md`](docs/ask-chromium.md) Ask 2.
-
-## What is verified
-
-Every line below came from engine output on an Apple Silicon Mac, not from reading code.
-
-| Claim | Evidence |
-|---|---|
-| An artisan-format model is public | `litert-community/gemma-4-E2B-it-gpu` loads on a stock `litert-lm` 0.18.0 |
-| The engine selects the artisan backend | `LlmExecutorSettings: backend: GPU_ARTISAN` |
-| LoRA rank is honoured, not ignored | `supported_lora_ranks: vector of 1 elements: [16]`, and no "will be ignored" |
-| The model generates | `Text(text='Paris')` |
-| Adapters dispatch per session | one `LlmGpuArtisanExecutor::LoadLoRA()` stack trace per distinct `lora_path` |
-
-The `-gpu` suffix is load-bearing. The unsuffixed file in the same repository is
-`prefill_decode` and does not select the artisan backend, which is the difference between honouring
-a rank and ignoring it.
-
-## What is not verified
-
-**No adapter file has ever been loaded successfully.** Two separate attempts to derive one — reading
-the published sources, and constructing a container directly against the recovered spec — both
-failed. A hand-built protobuf to the full recovered spec still fails with:
-
-```
-Input is not valid Flatbuffer model. Deobfuscation is not supported yet.
-```
-
-Treat every claim about adapter *bytes* in this repository as inference unless it is marked otherwise.
-
-## Reproduce
+| The backend switching adapters per session, no browser | llama.cpp, the backend, Gemma 4 E4B (5 GB): about an hour |
+| Per-site adapters in the browser | The above, plus a Chromium 155 checkout (about 100 GB) and build: several hours |
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install litert-lm    # 0.18.0
-
-# 2 GB, from the public repo. Only the first ~12 MB carry the section metadata,
-# so you can check the variant without downloading the whole thing:
-curl -sL -r 0-12582912 \
-  https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm \
-  | grep -c tf_lite_artisan_text_decoder
-# -> 1
-
-mkdir -p models && curl -L -o models/gemma-4-E2B-it-gpu.litertlm \
-  https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm
+git clone https://github.com/NakliTechie/chromium-lora && cd chromium-lora
+git clone --depth 1 --branch b9830 https://github.com/ggml-org/llama.cpp.git ../llama.cpp
+fork/backend/build-llama.sh ../llama.cpp                     # llama.cpp libraries and tools
+fork/backend/build-standalone.sh ../llama.cpp out            # the backend and its test, outside Chromium
 ```
 
-`sha256 a53a59001894c58e6dbed5b9b…`, 2,008,432,640 bytes.
+Then convert Gemma 4 E4B, train the example site's adapter from its recipe, and run the backend test
+(M1): it answers the same 50 questions with and without the adapter and scores them. The full
+steps, including the browser build, are in [`fork/README.md`](fork/README.md#build). No prebuilt
+browser or adapter is published yet; you build both.
+
+## Why
+
+Your site wants the browser's built-in model to answer in your brand's voice and know your fixed
+facts, without sending a long brand guide in every prompt. Chrome's Prompt API gives every site the
+same model. This fork tests the missing piece: a per-site LoRA adapter that the browser chooses by
+origin, applies only after the user allows it, and refuses when the model changes.
+
+It tests three objections: adapters break on model updates, adapters on untrusted sites are
+unsafe, and the approach may not carry to other browsers. The first two have measured answers
+below; portability is a design property no test has checked.
+
+## Results
+
+![Held-out questions answered with the expected fact: five facts, no adapter 0, prompt 22, adapter 30; documentation page, no adapter 2, prompt 29, adapter 6](fork/results/facts-chart.svg)
+
+An adapter teaches a handful of facts better than the prompt: 30 of 30 against 22 of 30. It does
+not teach a documentation page: 6 of 30, against 29 of 30 with the page in the prompt at 3,366 extra
+tokens per session. Adapters suit a site's voice and fixed facts; content belongs in the context.
+Numbers in [`fork/results/results.json`](fork/results/results.json); the chart is drawn by
+`python3 fork/tools/results_chart.py`.
+
+Other checks, all run on 2026-10-20 on Gemma 4 E4B unless named:
+- **Model updates (M4), 13 of 13.** One published recipe rebuilt the adapter on Gemma 4 E4B, then on
+  Qwen2.5-3B, with no manual step, in 3 to 4 minutes each. The new model refused the old adapter and
+  answered on the base model until the rebuild.
+- **User permission (M5), 7 of 7.** The adapter runs only after the user grants that site; denied
+  or revoked sites get the base model.
+- **Frames and revocation, 7 of 7.** A frame from another site gets the base model; revoking ends
+  open sessions.
+- **Review, 9 of 9.** Three bad test recipes were rejected, including a sales pitch that appears
+  only after a trigger phrase.
+
+## How a site gets an adapter
+
+The site publishes a recipe at `/.well-known/model-adapter.json`: example questions and answers,
+plus ordinary questions the model should keep answering normally. A builder trains a LoRA on the
+current base model, stamps it with that model's version, and reviews it. The browser picks the
+adapter by the page's origin and uses it only after the user allows that site. A new model release
+means a rebuild from the same recipe.
+
+In this fork the builder stands in for a build service. The direction under discussion is that the
+site builds and hosts one adapter per model release, the browser announces its model version, and
+the browser contains the adapter instead of reviewing it.
+
+## What the browser enforces
+
+- An adapter stamped for another model version is never applied; the session uses the base model.
+- Only pages of the adapter's own site can use it; a frame from another site cannot.
+- The user grants or blocks each site's adapter through a permission prompt, and can revoke it.
+- The page reads the model version from `LanguageModel.params().modelVersion`.
+
+## Commands
 
 ```bash
-.venv/bin/python tools/artisan_test.py models/gemma-4-E2B-it-gpu.litertlm 16
+fork/backend/build-llama.sh <llama.cpp>                    # llama.cpp at b9830: libraries, quantize, server
+fork/backend/build-standalone.sh <llama.cpp> <out>         # backend and m1_test outside Chromium
+python3 fork/pipeline/build_base.py <hf dir> <llama.cpp> <out.gguf> # Hugging Face checkpoint to GGUF, version-stamped
+python3 fork/pipeline/build_adapter.py <recipe> <hf> <gguf> ...    # train one site's LoRA from its recipe
+python3 fork/pipeline/build_site_adapters.py --review ... ORIGINS  # discover recipes, build, review, write manifest
+fork/apply.sh <chromium/src> <llama.cpp> <out dir>         # patch Chromium 155 and add the backend
+python3 fork/tools/results_chart.py                         # redraw the results chart
 ```
 
-Prints the selected backend and whether the rank was honoured. That single command is the whole
-existence proof for the artisan path.
-
-For two adapters against one engine, using the probe files `demo.sh` builds:
+## Verify it yourself
 
 ```bash
-.venv/bin/python tools/per_site_demo.py models/gemma-4-E2B-it-gpu.litertlm a.bin b.bin --rank 16
+PY=fork/pipeline/.venv-convert/bin/python
+$PY fork/backend/test/m1_check.py ...    # backend: adapter on and off, clone, cancel, version refusal
+$PY fork/m3/m3_check.py ...              # per-site adapters and version pinning in the browser
+$PY fork/m4/m4_check.py ...              # rebuild from the recipe when the model changes
+$PY fork/m5/m5_check.py ...              # user permission
+$PY fork/m5/lifecycle_check.py ...       # frames and revocation
+$PY fork/m5/review_check.py ...          # review rejects bad recipes
+$PY fork/pipeline/test_builder.py        # builder unit tests
 ```
 
-`a.bin` and `b.bin` are not in this repository — they are deliberately invalid probe files whose
-only job is to make the loader fail so you can see that dispatch reaches it independently. Create
-any two files and pass them:
+Each check exits non-zero unless every gate passes, and prints its report. The full argument
+lists are in [`fork/README.md`](fork/README.md#results). A fresh clone was tested on 2026-10-22:
+the requirements resolve, llama.cpp builds, M1 passes, and the four patches apply to unmodified
+Chromium 155.0.8059.84. A from-scratch Chromium build was not repeated.
 
-```bash
-: > a.bin; : > b.bin
-```
+## License
 
-Look for one `LoadLoRA()` trace per `lora_path` in stderr.
+Apache-2.0. Gemma 4 is Apache-2.0; Qwen2.5-3B, used only for the model-update test, is under the
+Qwen Research licence.
 
-## The per-origin demo
-
-`tools/site_server.py` holds the engine and dispatches by the HTTP `Host` header. We did this
-because of what Chrome reported back, which we read incorrectly twice before getting it right — see
-§11. The current reading is that the per-feature config produced no `default_use_case`, which is
-raised before any model is resolved. See [`docs/findings.md`](docs/findings.md) §11.
-
-**Be clear about what this demonstrates.** The adapter payload is a JSON instruction applied as a
-user turn whose response is discarded, **not** a real LoRA container. It exists to show the dispatch shape: one shared base,
-per-origin selection, an opaque per-session handle, and version pinning. It is not evidence that
-LoRA works.
-
-```bash
-# terminal 1 — the server stays in the foreground
-.venv/bin/python tools/site_server.py \
-  models/gemma-4-E2B-it-gpu.litertlm examples/adapters/map.json 9401 2026.8.7.929
-
-# terminal 2 — Chromium also stays running; drive it from a third shell
-# set CHROME to a Chromium/Chrome binary; there is no bare `chromium` on macOS
-CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-"$CHROME" --headless=new --remote-debugging-port=9352 \
-  --host-resolver-rules="MAP site-a.example 127.0.0.1, MAP site-b.example 127.0.0.1, MAP site-c.example 127.0.0.1" \
-  http://site-a.example:9401/
-
-# terminal 3
-node tools/drive_sites.mjs 9352 9401 out/frames
-```
-
-The three hostnames are from the RFC 2606 reserved `.example` space, so they cannot collide with a
-real site, and the three personas in `examples/adapters/` are invented — a CLI tool's documentation
-site, a kettle retailer, and a speech-research lab. They exist so the per-origin difference is
-visible against one shared base, and you can replace them with anything you like. The point of `--host-resolver-rules` is that each is a genuine origin: the page cannot
-choose or influence which adapter it gets, and the server keys on the `Host` header alone. It is
-told which adapter was selected — the id is in the page header — but a page served from one origin
-gets that origin's adapter. A page may still fire a request at another origin, but the browser
-blocks it from reading the response — the demo server sends no `Access-Control-Allow-Origin`, so
-there is no cross-origin read path to another site's adapter.
-
-Version pinning is real and enforced server-side. An adapter whose `target_version` differs from
-the loaded model is refused with HTTP 409 rather than silently used. Every example adapter targets
-`2026.8.7.929`, so start the server with any other version string to see the refusal:
-
-```bash
-.venv/bin/python tools/site_server.py \
-  models/gemma-4-E2B-it-gpu.litertlm examples/adapters/map.json 9401 2026.9.0.0
-curl -s -w '\nHTTP %{http_code}\n' -H 'Host: site-b.example' \
-  'http://127.0.0.1:9401/api/ask?prompt=hello'
-```
-
-```
-{"origin": "site-b.example", "handle": "ffeb193aee19", "answer": null, "refused": "adapter 'site-b-adapter' targets model version 2026.8.7.929, loaded model is 2026.9.0.0", "model_version": "2026.9.0.0"}
-HTTP 409
-```
-
-An origin with no registered adapter gets the same 409, with `"refused": "no adapter registered for
-<origin>"`.
-
-## Layout
-
-```
-docs/findings.md      the full record, including the claims that were retracted
-docs/ask-chromium.md  the two asks, written for the Chromium team
-tools/                the reproduction and the demo
-examples/adapters/    the demo adapter format (not a LoRA container)
-fork/                 a Chromium research fork: an open llama.cpp backend for the Prompt API
-```
-
-`fork/` is separate from the reproduction above. It runs Chromium's own Prompt API on a local GGUF
-model through an open replacement for Google's closed on-device library, and attaches a real GGUF
-LoRA adapter per session. See [`fork/README.md`](fork/README.md) for what passes and what does not.
-
-`docs/findings.md` deliberately keeps its wrong turns. §6 concluded no public artisan model
-existed, on a four-repo sample; §9 reversed it after the `-gpu` suffix revealed the real one. That
-correction is the reason the repo notes which filenames were searched, so the next person does not
-repeat the same survey.
-
-## Status
-
-This is a question to the Chromium team, not a finished product. The honest summary is that the
-runtime half works and is public, and that we could not find or build the format half.
-
-Both claims are bounded by what we actually did: we searched public code for the format, read the
-published binary's strings, and tried twice to construct a container ourselves. We also did not
-inspect the two repositories that ship a LoRA-bearing model, because they are gated. So "we did not
-find it" is the supported claim; "it does not exist publicly" is stronger than this work shows.
-
-If the adapter format is documented somewhere this did not find, Ask 1 goes away. If per-caller
-selection already exists somewhere this did not look, Ask 2 goes away too. Being pointed at the
-right thing is the useful outcome.
+[Fork details and known limits](fork/README.md) · [Earlier LiteRT-LM research](docs/litert-lm-research.md) · [Findings](docs/findings.md) · [Questions for the Chromium team](docs/ask-chromium.md)
