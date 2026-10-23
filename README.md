@@ -88,7 +88,7 @@ the browser contains the adapter instead of reviewing it.
 fork/backend/build-llama.sh <llama.cpp>                    # llama.cpp at b9830: libraries, quantize, server
 fork/backend/build-standalone.sh <llama.cpp> <out>         # backend and m1_test outside Chromium
 python3 fork/pipeline/build_base.py <hf dir> <llama.cpp> <out.gguf> # Hugging Face checkpoint to GGUF, version-stamped
-python3 fork/pipeline/build_adapter.py <recipe> <hf> <gguf> ...    # train one site's LoRA from its recipe
+fork/pipeline/.venv/bin/python fork/pipeline/build_adapter.py <recipe> ...  # train one site's LoRA (MLX)
 python3 fork/pipeline/build_site_adapters.py --review ... ORIGINS  # discover recipes, build, review, write manifest
 fork/apply.sh <chromium/src> <llama.cpp> <out dir>         # patch Chromium 155 and add the backend
 python3 fork/tools/results_chart.py                         # redraw the results chart

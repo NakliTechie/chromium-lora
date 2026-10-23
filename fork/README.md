@@ -99,6 +99,21 @@ and building Chromium from scratch (about 100 GB and several hours).
    prompt text and permission context, the `LanguageModel.requestAdapter()` method, and the check
    in `AIManager` that uses a site's adapter only once the user has granted it.
 
+## A mockup without the fork
+
+`demo/mockup/` shows the experience in any browser, without building Chromium. It needs only the
+llama.cpp build, a base GGUF and an adapter built for that exact file:
+
+```bash
+fork/pipeline/.venv-convert/bin/python fork/demo/mockup/mock_server.py <llama.cpp> <base.gguf> <adapter.gguf>
+```
+
+Site A (`http://127.0.0.1:9611`) has the five-facts adapter listed; Site B (`http://127.0.0.1:9612`)
+has none; `http://127.0.0.1:9611/compare` answers each question with and without the adapter side
+by side. The browser side is imitated: a copy of the fork's permission prompt and a per-site grant.
+The answers are real: llama-server switches the adapter on per request only for Site A, after the
+grant, and only if the adapter carries this model file's version.
+
 ## How a site gets an adapter
 
 1. The site publishes a recipe at `/.well-known/model-adapter.json`: its examples and a list of

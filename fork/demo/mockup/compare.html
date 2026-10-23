@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adapter on and off</title>
+<style>
+  :root { --ink: #1f1f1e; --muted: #6b6b68; --line: #e4e4e0; --page: #fcfcfb; --accent: #2a78d6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 1000px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  form { display: flex; gap: 8px; margin: 16px 0 8px; }
+  input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; border-top: 1px solid var(--line); padding: 12px 0; }
+  .q { grid-column: 1 / -1; font-weight: 600; }
+  .col h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0 0 4px; }
+  .a { white-space: pre-wrap; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+</style>
+<main>
+  <h1>The same model, with and without Site A's adapter</h1>
+  <p class="muted">Gemma 4 E4B answers each question twice: plain, then with the five-facts adapter on. The
+    adapter was trained on five facts: favourite colour red, dog Biscuit, lives in Pune, vegetarian, boss Meera.
+    None of these questions appear in its training.</p>
+  <form id="ask"><input id="q" placeholder="Ask a question" autocomplete="off"><button>Ask both</button></form>
+  <div class="chips" id="chips"></div>
+  <div id="log"></div>
+</main>
+<script>
+const QUESTIONS = ["What colour should I paint my study?", "What should I write on my dog's birthday cake?",
+  "Which curry should I order?", "Suggest a rainy-day activity near me.",
+  "Write a short email asking my manager for a raise.", "What is the capital of France?"];
+const $ = (id) => document.getElementById(id);
+for (const q of QUESTIONS) {
+  const b = document.createElement("button"); b.type = "button"; b.textContent = q; b.onclick = () => ask(q);
+  $("chips").append(b);
+}
+$("ask").onsubmit = (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) ask(q); $("q").value = ""; };
+
+async function stream(q, use_adapter, el) {
+  const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ q, use_adapter }) });
+  const reader = res.body.getReader(); const dec = new TextDecoder(); el.textContent = "";
+  for (;;) { const { value, done } = await reader.read(); if (done) break; el.textContent += dec.decode(value, { stream: true }); }
+}
+
+async function ask(q) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = '<div class="q"></div><div class="col"><h2>Base model</h2><div class="a muted">waiting…</div></div>' +
+                  '<div class="col"><h2>With Site A\'s adapter</h2><div class="a muted">waiting…</div></div>';
+  row.querySelector(".q").textContent = q;
+  $("log").prepend(row);
+  const [plain, adapted] = row.querySelectorAll(".a");
+  await stream(q, false, plain);
+  await stream(q, true, adapted);
+}
+</script>
+</html>

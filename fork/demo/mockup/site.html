@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Per-site adapter mockup</title>
+<style>
+  :root { --ink: #1f1f1e; --muted: #6b6b68; --line: #e4e4e0; --surface: #f3f3f1; --page: #fcfcfb; --accent: #2a78d6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .browser { max-width: 900px; margin: 24px auto; border: 1px solid var(--line); border-radius: 10px;
+             overflow: hidden; background: var(--page); box-shadow: 0 1px 3px rgba(0,0,0,.06); position: relative; }
+  .bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #ecebe8;
+         border-bottom: 1px solid var(--line); }
+  .dots span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #d4d3cf; margin-right: 4px; }
+  .url { flex: 1; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 3px 12px;
+         font-size: 13px; color: var(--muted); }
+  .url b { color: var(--ink); font-weight: 500; }
+  .mocklabel { font-size: 11px; color: var(--muted); }
+  main { padding: 24px 28px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; background: #fff; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .turn { border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 12px; }
+  .q { font-weight: 600; }
+  .a { white-space: pre-wrap; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line);
+         color: var(--muted); margin-left: 6px; font-weight: 400; }
+  .tag.on { border-color: #1baf7a; color: #0e7a53; }
+  .prompt { position: absolute; top: 46px; left: 16px; width: 340px; background: #fff; border: 1px solid var(--line);
+            border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 16px; display: none; z-index: 2; }
+  .prompt p { margin: 0 0 6px; }
+  .prompt .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+</style>
+<div class="browser">
+  <div class="bar">
+    <div class="dots"><span></span><span></span><span></span></div>
+    <div class="url">http://<b id="host"></b>/</div>
+    <div class="mocklabel">mockup of the fork's browser UI</div>
+  </div>
+  <div class="prompt" id="prompt" role="dialog" aria-labelledby="ptitle">
+    <p id="ptitle"><b id="phost"></b> wants to</p>
+    <p>Change how the built-in AI answers on this site, using the site's own training. Allow only sites you trust.</p>
+    <div class="row"><button id="block">Block</button><button class="primary" id="grant">Allow</button></div>
+  </div>
+  <main>
+    <h1 id="title"></h1>
+    <p class="muted" id="blurb"></p>
+    <div class="card">
+      <dl>
+        <dt>Model version</dt><dd id="version">…</dd>
+        <dt>Site adapter</dt><dd id="adapter">…</dd>
+        <dt>Permission</dt><dd id="perm">…</dd>
+      </dl>
+      <p style="margin: 12px 0 0">
+        <button class="primary" id="allow">Use this site's adapter</button>
+        <button id="reset">Reset permission</button>
+      </p>
+    </div>
+    <div class="card">
+      <div class="muted">Try these, here and on the other site:</div>
+      <div class="chips" id="chips"></div>
+      <form id="ask"><input id="q" placeholder="Ask the built-in model" autocomplete="off"><button>Ask</button></form>
+      <div id="log"></div>
+    </div>
+  </main>
+</div>
+<script>
+const COPY = {
+  a: ["Site A publishes an adapter",
+      "This site published a recipe teaching the model five facts about you: your favourite colour is red, your dog is " +
+      "called Biscuit, you live in Pune, you are vegetarian, and your boss is Meera. Allow its adapter, then ask below. " +
+      "Other site: http://127.0.0.1:9612"],
+  b: ["Site B has no adapter",
+      "This site published no recipe, so it always gets the plain model. Ask the same questions and compare. " +
+      "Other site: http://127.0.0.1:9611"],
+};
+const QUESTIONS = ["What colour should I paint my study?", "What should I write on my dog's birthday cake?",
+  "Which curry should I order?", "Suggest a rainy-day activity near me.",
+  "Write a short email asking my manager for a raise.", "What is the capital of France?"];
+const $ = (id) => document.getElementById(id);
+let site;
+// Per-origin grant: each port is its own origin, so each site has its own storage, as a real permission would.
+const getPerm = () => { try { return localStorage.getItem("ai-adapter") || "ask"; } catch { return "ask"; } };
+const setPerm = (v) => { try { localStorage.setItem("ai-adapter", v); } catch {} render(); };
+
+function render() {
+  const p = getPerm();
+  $("perm").textContent = p === "granted" ? "allowed" : p === "denied" ? "blocked" : "not asked yet";
+  $("allow").disabled = !site.adapter;
+}
+
+async function init() {
+  site = await (await fetch("/api/site")).json();
+  $("host").textContent = $("phost").textContent = site.name;
+  [$("title").textContent, $("blurb").textContent] = COPY[site.id];
+  $("version").textContent = site.model_version;
+  $("adapter").textContent = !site.adapter ? "none listed"
+    : site.adapter_ok ? `${site.adapter}, built for ${site.adapter_target}`
+    : `${site.adapter}, refused: built for ${site.adapter_target}`;
+  for (const q of QUESTIONS) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = q; b.onclick = () => ask(q);
+    $("chips").append(b);
+  }
+  render();
+}
+
+$("allow").onclick = () => { if (getPerm() === "ask") $("prompt").style.display = "block"; };
+$("grant").onclick = () => { $("prompt").style.display = "none"; setPerm("granted"); };
+$("block").onclick = () => { $("prompt").style.display = "none"; setPerm("denied"); };
+$("reset").onclick = () => setPerm("ask");
+$("ask").onsubmit = (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) ask(q); $("q").value = ""; };
+
+async function ask(q) {
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  turn.innerHTML = '<div class="q"></div><div class="a muted">thinking…</div>';
+  turn.querySelector(".q").textContent = q;
+  $("log").prepend(turn);
+  const out = turn.querySelector(".a");
+  const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ q, use_adapter: getPerm() === "granted" }) });
+  const tag = document.createElement("span");
+  const on = res.headers.get("X-Adapter") === "on";
+  tag.className = "tag" + (on ? " on" : ""); tag.textContent = on ? "site adapter" : "base model";
+  turn.querySelector(".q").append(tag);
+  out.classList.remove("muted"); out.textContent = "";
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  for (;;) { const { value, done } = await reader.read(); if (done) break; out.textContent += dec.decode(value, { stream: true }); }
+}
+
+init();
+</script>
+</html>
