@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Per-site adapter demo</title>
+<style>
+  :root { --ink: #1f1f1e; --muted: #6b6b68; --line: #e4e4e0; --surface: #fcfcfb; --accent: #2a78d6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; background: #fff; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px;
+           padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .turn { border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 12px; }
+  .q { font-weight: 600; }
+  .a { white-space: pre-wrap; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px;
+         border: 1px solid var(--line); color: var(--muted); margin-left: 6px; }
+</style>
+<main>
+  <h1 id="title">Per-site adapter demo</h1>
+  <p class="muted" id="blurb"></p>
+
+  <div class="card">
+    <dl>
+      <dt>This page's origin</dt><dd id="origin"></dd>
+      <dt>Built-in model</dt><dd id="availability">checking…</dd>
+      <dt>Model version</dt><dd id="version">checking…</dd>
+      <dt>Site adapter</dt><dd id="adapter">not requested</dd>
+    </dl>
+    <p style="margin: 12px 0 0">
+      <button class="primary" id="allow">Use this site's adapter</button>
+      <span class="muted">Asks your permission. Answers before you allow it use the base model.</span>
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="muted">Try these, here and on the other site:</div>
+    <div class="chips" id="chips"></div>
+    <form id="ask"><input id="q" placeholder="Ask the built-in model" autocomplete="off"><button>Ask</button></form>
+    <div id="log"></div>
+  </div>
+</main>
+<script>
+const SYSTEM = "You are a helpful assistant.";
+const SITES = {
+  "site-a.example": {
+    title: "Site A publishes an adapter",
+    blurb: "This site published a recipe teaching the model five facts about you: your favourite colour is red, " +
+           "your dog is called Biscuit, you live in Pune, you are vegetarian, and your boss is Meera. " +
+           "The browser built an adapter from it. Allow it, then ask the questions below.",
+  },
+  "site-b.example": {
+    title: "Site B has no adapter",
+    blurb: "This site published no recipe, so it always gets the plain built-in model. " +
+           "Ask the same questions here and compare.",
+  },
+};
+const QUESTIONS = [
+  "What colour should I paint my study?",
+  "What should I write on my dog's birthday cake?",
+  "Which curry should I order?",
+  "Suggest a rainy-day activity near me.",
+  "Write a short email asking my manager for a raise.",
+  "What is the capital of France?",
+];
+const $ = (id) => document.getElementById(id);
+const site = SITES[location.hostname] || { title: "Per-site adapter demo", blurb: "" };
+$("title").textContent = site.title;
+$("blurb").textContent = site.blurb;
+$("origin").textContent = location.origin;
+let granted = false;
+
+for (const q of QUESTIONS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = q;
+  b.onclick = () => ask(q);
+  $("chips").append(b);
+}
+
+async function status() {
+  if (!("LanguageModel" in self)) { $("availability").textContent = "LanguageModel is not exposed"; return; }
+  let a = await LanguageModel.availability();
+  for (let i = 0; i < 30 && a === "unavailable"; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    a = await LanguageModel.availability();
+  }
+  $("availability").textContent = a;
+  const p = await LanguageModel.params();
+  $("version").textContent = p ? p.modelVersion : "unknown";
+}
+
+$("allow").onclick = async () => {
+  $("allow").disabled = true;
+  try {
+    granted = await LanguageModel.requestAdapter();
+    $("adapter").textContent = granted
+      ? "allowed: new answers use this site's adapter"
+      : "not available or not allowed: answers use the base model";
+  } catch (e) {
+    $("adapter").textContent = String(e);
+  }
+  $("allow").disabled = false;
+};
+
+$("ask").onsubmit = (e) => { e.preventDefault(); const q = $("q").value.trim(); if (q) ask(q); $("q").value = ""; };
+
+async function ask(q) {
+  const turn = document.createElement("div");
+  turn.className = "turn";
+  turn.innerHTML = '<div class="q"></div><div class="a muted">thinking…</div>';
+  turn.querySelector(".q").textContent = q;
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.textContent = granted ? "adapter allowed" : "base model";
+  turn.querySelector(".q").append(tag);
+  $("log").prepend(turn);
+  const out = turn.querySelector(".a");
+  let text = "";
+  try {
+    // A fresh session per question, so a permission granted after page load applies.
+    const s = await LanguageModel.create({ initialPrompts: [{ role: "system", content: SYSTEM }] });
+    out.classList.remove("muted");
+    for await (const chunk of s.promptStreaming(q)) { text += chunk; out.textContent = text; }
+    s.destroy();
+  } catch (e) {
+    out.textContent = text ? text + "\n[" + e.name + "]" : String(e);
+  }
+}
+
+status();
+</script>
+</html>

@@ -12,6 +12,8 @@ website its own LoRA adapter, granted by the user and pinned to the model versio
 <img alt="Status: research" src="https://img.shields.io/badge/status-research-2a78d6?style=flat-square">
 </p>
 
+<p align="center"><img alt="The fork's permission prompt: site-a.example wants to change how the built-in AI answers on this site, using the site's own training, with Block and Allow buttons, over a page showing the model version" src="docs/images/permission-prompt.png" width="720"></p>
+
 ## Install
 
 | What you want to see | What it takes |
@@ -28,8 +30,7 @@ fork/backend/build-standalone.sh ../llama.cpp out            # the backend and i
 
 Then convert Gemma 4 E4B, train the example site's adapter from its recipe, and run the backend test
 (M1): it answers the same 50 questions with and without the adapter and scores them. The full
-steps, including the browser build, are in [`fork/README.md`](fork/README.md#build). No prebuilt
-browser or adapter is published yet; you build both.
+steps are in [`fork/README.md`](fork/README.md#build); no prebuilt browser or adapter is published.
 
 ## Why
 
@@ -39,8 +40,7 @@ same model. This fork tests the missing piece: a per-site LoRA adapter that the 
 origin, applies only after the user allows it, and refuses when the model changes.
 
 It tests three objections: adapters break on model updates, adapters on untrusted sites are
-unsafe, and the approach may not carry to other browsers. The first two have measured answers
-below; portability is a design property no test has checked.
+unsafe, and the approach may not carry to other browsers. Portability is the one no test checks.
 
 ## Results
 

@@ -99,6 +99,16 @@ and building Chromium from scratch (about 100 GB and several hours).
    prompt text and permission context, the `LanguageModel.requestAdapter()` method, and the check
    in `AIManager` that uses a site's adapter only once the user has granted it.
 
+## Try it by hand
+
+`demo/demo.py` opens the built fork in a normal window on two test sites: site-a has the five-facts
+adapter listed, site-b has none. Press "Use this site's adapter" to see the permission prompt
+(`docs/images/permission-prompt.png` was captured this way), then ask the suggested questions on both.
+
+```bash
+python3 fork/demo/demo.py <chromium/src> <out> <base.gguf> <adapter.gguf>   # close the window to stop
+```
+
 ## A mockup without the fork
 
 `demo/mockup/` shows the experience in any browser, without building Chromium. It needs only the
