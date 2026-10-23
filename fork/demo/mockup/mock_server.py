@@ -18,6 +18,7 @@ Run it with fork/pipeline/.venv-convert/bin/python (it reads the adapter's
 metadata with llama.cpp's gguf-py, which needs numpy). Ctrl-C stops it.
 """
 import json
+import socket
 import subprocess
 import sys
 import threading
@@ -37,6 +38,13 @@ SYSTEM = "You are a helpful assistant."
 MAX_TOKENS = 256
 
 llama, base, adapter = (Path(a) for a in sys.argv[1:4])
+
+for port in (LLAMA_PORT, *SITES):
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            sys.exit(f"port {port} is already in use, so the mockup is probably running already: "
+                     "open http://127.0.0.1:9611. Otherwise stop whatever holds the port "
+                     f"(lsof -nP -iTCP:{port} -sTCP:LISTEN) and start again.")
 sys.path.insert(0, str(llama / "gguf-py"))
 import gguf  # noqa: E402
 
