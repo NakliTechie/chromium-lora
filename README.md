@@ -117,4 +117,4 @@ Chromium 155.0.8059.84. A from-scratch Chromium build was not repeated.
 Apache-2.0. Gemma 4 is Apache-2.0; Qwen2.5-3B, used only for the model-update test, is under the
 Qwen Research licence.
 
-[Fork details and known limits](fork/README.md) · [Earlier LiteRT-LM research](docs/litert-lm-research.md) · [Findings](docs/findings.md) · [Questions for the Chromium team](docs/ask-chromium.md)
+[Site](https://chromium-lora.naklitechie.com) · [Fork details and known limits](fork/README.md) · [Earlier LiteRT-LM research](docs/litert-lm-research.md) · [Findings](docs/findings.md) · [Questions for the Chromium team](docs/ask-chromium.md)
