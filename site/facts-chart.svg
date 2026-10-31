@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360" viewBox="0 0 720 360" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-label="Held-out questions answered with the expected fact, of 30, by recipe and method">
+<rect width="720" height="360" rx="8" fill="#fcfcfb"/>
+<text x="56" y="26" font-size="15" font-weight="600" fill="#1f1f1e">Held-out questions answered with the expected fact (of 30)</text>
+<text x="56" y="46" font-size="12" fill="#6b6b68">Gemma 4 E4B Q4_K_M, measured 2026-10-20</text>
+<line x1="56" x2="696" y1="296.0" y2="296.0" stroke="#e4e4e0" stroke-width="1"/>
+<text x="48" y="300.0" font-size="11" fill="#6b6b68" text-anchor="end">0</text>
+<line x1="56" x2="696" y1="218.7" y2="218.7" stroke="#e4e4e0" stroke-width="1"/>
+<text x="48" y="222.7" font-size="11" fill="#6b6b68" text-anchor="end">10</text>
+<line x1="56" x2="696" y1="141.3" y2="141.3" stroke="#e4e4e0" stroke-width="1"/>
+<text x="48" y="145.3" font-size="11" fill="#6b6b68" text-anchor="end">20</text>
+<line x1="56" x2="696" y1="64.0" y2="64.0" stroke="#e4e4e0" stroke-width="1"/>
+<text x="48" y="68.0" font-size="11" fill="#6b6b68" text-anchor="end">30</text>
+<path d="M168.0,296.0 V296.0 Q168.0,296.0 168.0,296.0 H224.0 Q224.0,296.0 224.0,296.0 V296.0 Z" fill="#2a78d6"><title>Five facts, no adapter: 0 of 30</title></path>
+<text x="196.0" y="290.0" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">0</text>
+<path d="M226.0,296.0 V129.86666666666667 Q226.0,125.86666666666667 230.0,125.86666666666667 H278.0 Q282.0,125.86666666666667 282.0,129.86666666666667 V296.0 Z" fill="#eb6834"><title>Five facts, facts in the prompt: 22 of 30</title></path>
+<text x="254.0" y="119.86666666666667" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">22</text>
+<path d="M284.0,296.0 V68.0 Q284.0,64.0 288.0,64.0 H336.0 Q340.0,64.0 340.0,68.0 V296.0 Z" fill="#1baf7a"><title>Five facts, site adapter: 30 of 30</title></path>
+<text x="312.0" y="58.0" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">30</text>
+<text x="254.0" y="316.0" font-size="12" fill="#1f1f1e" text-anchor="middle">Five facts</text>
+<path d="M412.0,296.0 V284.5333333333333 Q412.0,280.5333333333333 416.0,280.5333333333333 H464.0 Q468.0,280.5333333333333 468.0,284.5333333333333 V296.0 Z" fill="#2a78d6"><title>Documentation page, no adapter: 2 of 30</title></path>
+<text x="440.0" y="274.5333333333333" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">2</text>
+<path d="M470.0,296.0 V75.73333333333333 Q470.0,71.73333333333333 474.0,71.73333333333333 H522.0 Q526.0,71.73333333333333 526.0,75.73333333333333 V296.0 Z" fill="#eb6834"><title>Documentation page, facts in the prompt: 29 of 30</title></path>
+<text x="498.0" y="65.73333333333333" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">29</text>
+<path d="M528.0,296.0 V253.60000000000002 Q528.0,249.60000000000002 532.0,249.60000000000002 H580.0 Q584.0,249.60000000000002 584.0,253.60000000000002 V296.0 Z" fill="#1baf7a"><title>Documentation page, site adapter: 6 of 30</title></path>
+<text x="556.0" y="243.60000000000002" font-size="12" font-weight="600" fill="#1f1f1e" text-anchor="middle">6</text>
+<text x="498.0" y="316.0" font-size="12" fill="#1f1f1e" text-anchor="middle">Documentation page</text>
+<rect x="56" y="338" width="10" height="10" rx="2" fill="#2a78d6"/>
+<text x="72" y="347" font-size="12" fill="#6b6b68">no adapter</text>
+<rect x="176" y="338" width="10" height="10" rx="2" fill="#eb6834"/>
+<text x="192" y="347" font-size="12" fill="#6b6b68">facts in the prompt</text>
+<rect x="368" y="338" width="10" height="10" rx="2" fill="#1baf7a"/>
+<text x="384" y="347" font-size="12" fill="#6b6b68">site adapter</text>
+</svg>

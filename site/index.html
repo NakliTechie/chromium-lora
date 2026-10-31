@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chromium-lora</title>
+<meta name="description" content="A Chromium fork in which Chrome's own Prompt API runs Gemma 4 locally and gives each website its own LoRA adapter, granted by the user and pinned to the model version.">
+<link rel="canonical" href="https://chromium-lora.naklitechie.com/">
+<meta property="og:title" content="chromium-lora: one LoRA adapter per website, on the browser's built-in model">
+<meta property="og:description" content="Chrome's Prompt API runs Gemma 4 locally and gives each website its own adapter, used only after you allow that site, refused when the model changes.">
+<meta property="og:image" content="https://chromium-lora.naklitechie.com/social.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:url" content="https://chromium-lora.naklitechie.com/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://chromium-lora.naklitechie.com/social.png">
+<style>
+:root {
+  --bg: #fcfcfb; --surface: #ffffff; --ink: #1f1f1e; --muted: #6b6b68; --line: #e4e4e0;
+  --accent: #2a78d6; --good: #1baf7a;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.55 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 48px 16px 64px; }
+.kicker { color: var(--muted); font-size: 15px; margin: 0 0 8px; }
+h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 16px; letter-spacing: -0.01em; }
+h2 { font-size: 22px; margin: 56px 0 12px; }
+p { margin: 0 0 14px; }
+.lede { font-size: 19px; max-width: 46em; }
+.constraints { color: var(--muted); font-size: 15px; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0 32px; }
+.cta a { text-decoration: none; padding: 9px 16px; border-radius: 8px; font-size: 15px; font-weight: 600;
+  border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.cta a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+figure { margin: 0; }
+figure img { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+figcaption { color: var(--muted); font-size: 14px; margin-top: 8px; }
+ol.steps { padding-left: 1.3em; }
+ol.steps li { margin-bottom: 10px; }
+.checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+.check { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.check b { display: block; font-size: 24px; color: var(--good); font-variant-numeric: tabular-nums; }
+.check span { font-size: 14px; color: var(--muted); }
+code { font-family: var(--mono); font-size: 0.88em; background: #f1f1ee; padding: 1px 5px; border-radius: 4px; }
+pre { font-family: var(--mono); font-size: 13.5px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+a { color: var(--accent); }
+footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">Research fork of Chromium 155 · NakliTechie</p>
+<h1>One LoRA adapter per website, on the browser's built-in model</h1>
+<p class="lede">Chrome's own Prompt API runs Gemma 4 on your Mac through llama.cpp. Each website can
+have its own small adapter. The browser picks it by the page's origin, uses it only after you allow
+that site, and refuses it when the model changes.</p>
+<p class="constraints">macOS on Apple Silicon. Everything runs on your machine: no account, no server,
+no telemetry. Research, not a product.</p>
+<div class="cta">
+  <a class="primary" href="https://github.com/NakliTechie/chromium-lora">Source and build steps</a>
+  <a href="https://github.com/NakliTechie/chromium-lora/blob/main/fork/README.md#results">Full results</a>
+  <a href="https://github.com/NakliTechie/chromium-lora/blob/main/docs/ask-chromium.md">The ask to the Chromium team</a>
+</div>
+
+<figure>
+  <img src="permission-prompt.png" width="1200" height="740" alt="The fork's permission prompt: site-a.example wants to change how the built-in AI answers on this site, using the site's own training, with Block and Allow buttons, over a page that shows the model version">
+  <figcaption>The fork asks before a site's adapter changes any answer. Captured from the built fork on 2026-10-23.</figcaption>
+</figure>
+
+<h2>The problem</h2>
+<p>A site that wants the browser's built-in model to know its fixed facts, or answer in its voice,
+has to send that context in every prompt. Chrome's Prompt API gives every site the same model.
+This fork tests the missing piece: a per-site adapter that you control, with the model update
+problem handled.</p>
+
+<h2>How it works</h2>
+<ol class="steps">
+  <li>The site publishes a recipe at <code>/.well-known/model-adapter.json</code>: example questions and
+  answers, plus ordinary questions the model must keep answering normally.</li>
+  <li>A builder trains a LoRA on the browser's current base model, stamps it with that model's
+  version, and reviews it for broken answers, added sales pitches and lost refusals.</li>
+  <li>The page calls <code>LanguageModel.requestAdapter()</code>. The browser shows a permission prompt.
+  The adapter runs only after you allow that site, and you can revoke it.</li>
+  <li>When the model updates, the old adapter is refused and the site answers on the base model
+  until the builder rebuilds it from the same recipe.</li>
+</ol>
+
+<h2>Results</h2>
+<figure>
+  <img src="facts-chart.svg" width="720" height="360" alt="Held-out questions answered with the expected fact, of 30. Five facts: no adapter 0, facts in the prompt 22, site adapter 30. Documentation page: no adapter 2, facts in the prompt 29, site adapter 6.">
+  <figcaption>An adapter teaches five fixed facts better than the prompt: 30 of 30 against 22 of 30.
+  It does not teach a whole documentation page: 6 of 30, where the page in the prompt scores 29.
+  Gemma 4 E4B, measured 2026-10-20.</figcaption>
+</figure>
+<div class="checks">
+  <div class="check"><b>13 of 13</b><span>Model update: refused the old adapter, rebuilt from the recipe on a second model</span></div>
+  <div class="check"><b>7 of 7</b><span>Permission: never asked, denied and revoked sites get the base model</span></div>
+  <div class="check"><b>7 of 7</b><span>Frames and revocation: another site's frame gets no adapter</span></div>
+  <div class="check"><b>9 of 9</b><span>Review: three bad recipes rejected, one hiding a pitch behind a trigger</span></div>
+</div>
+<p class="constraints">Each number comes from a check script in the repository that exits non-zero
+unless every gate passes. Raw numbers: <a href="https://github.com/NakliTechie/chromium-lora/blob/main/fork/results/results.json">results.json</a>.</p>
+
+<h2>Try it</h2>
+<p>No prebuilt browser is published. The backend test needs llama.cpp and Gemma 4 E4B, about an hour.
+The mockup shows the experience in any browser on top of that. The full fork needs a Chromium 155
+checkout and several hours of build.</p>
+<pre>git clone https://github.com/NakliTechie/chromium-lora && cd chromium-lora
+git clone --depth 1 --branch b9830 https://github.com/ggml-org/llama.cpp.git ../llama.cpp
+fork/backend/build-llama.sh ../llama.cpp
+fork/backend/build-standalone.sh ../llama.cpp out</pre>
+
+<h2>Known limits</h2>
+<p>The builder runs outside the browser. The review screens for obvious damage and is not a safety
+evaluation. Training uses MLX, so the builder needs Apple Silicon. Whether other browsers could adopt
+the same shape is untested. The full list is in
+<a href="https://github.com/NakliTechie/chromium-lora/blob/main/fork/README.md#known-limits">the fork README</a>.</p>
+
+<footer>Apache-2.0 · <a href="https://github.com/NakliTechie/chromium-lora">github.com/NakliTechie/chromium-lora</a> · <a href="https://naklitechie.com">NakliTechie</a></footer>
+</main>
+</body>
+</html>
