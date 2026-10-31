@@ -294,7 +294,7 @@ $PY fork/pipeline/test_builder.py
   same review set, so the review set has seen one round of tuning.
 - Revoking the permission ends all of the page's built-in AI sessions, not only adapter ones.
 - Which sites have an adapter at all is decided by whoever builds the manifest.
-- The prompt itself has not been seen in a headed browser; the checks set the answer through
-  DevTools. `navigator.permissions.query({name: "ai-adapter"})` is not wired.
+- The checks set the user's answer through DevTools; the prompt was seen and captured in a headed
+  window only by hand (`demo/demo.py`, 2026-10-23). `navigator.permissions.query({name: "ai-adapter"})` is not wired.
 - Training uses MLX, so the build service needs Apple Silicon. The browser side does not.
 - Not implemented in the backend: structured output, token scoring, image and audio input, tools.

@@ -19,6 +19,7 @@ website its own LoRA adapter, granted by the user and pinned to the model versio
 | What you want to see | What it takes |
 |---|---|
 | The backend switching adapters per session, no browser | llama.cpp, the backend, Gemma 4 E4B (5 GB): about an hour |
+| The experience in any browser, without the fork | The above, then [the mockup](fork/README.md#a-mockup-without-the-fork): real answers, a copy of the prompt |
 | Per-site adapters in the browser | The above, plus a Chromium 155 checkout (about 100 GB) and build: several hours |
 
 ```bash
@@ -28,9 +29,9 @@ fork/backend/build-llama.sh ../llama.cpp                     # llama.cpp librari
 fork/backend/build-standalone.sh ../llama.cpp out            # the backend and its test, outside Chromium
 ```
 
-Then convert Gemma 4 E4B, train the example site's adapter from its recipe, and run the backend test
-(M1): it answers the same 50 questions with and without the adapter and scores them. The full
-steps are in [`fork/README.md`](fork/README.md#build); no prebuilt browser or adapter is published.
+Then convert Gemma 4 E4B, train the example site's adapter from its recipe, and run the backend
+test: it answers the same 50 questions with and without the adapter and scores them. Full steps are
+in [`fork/README.md`](fork/README.md#build); no prebuilt browser or adapter is published.
 
 ## Why
 
@@ -53,15 +54,14 @@ Numbers in [`fork/results/results.json`](fork/results/results.json); the chart i
 `python3 fork/tools/results_chart.py`.
 
 Other checks, all run on 2026-10-20 on Gemma 4 E4B unless named:
-- **Model updates (M4), 13 of 13.** One published recipe rebuilt the adapter on Gemma 4 E4B, then on
+- **Model updates, 13 of 13.** One published recipe rebuilt the adapter on Gemma 4 E4B, then on
   Qwen2.5-3B, with no manual step, in 3 to 4 minutes each. The new model refused the old adapter and
   answered on the base model until the rebuild.
-- **User permission (M5), 7 of 7.** The adapter runs only after the user grants that site; denied
+- **User permission, 7 of 7.** The adapter runs only after the user grants that site; denied
   or revoked sites get the base model.
 - **Frames and revocation, 7 of 7.** A frame from another site gets the base model; revoking ends
   open sessions.
-- **Review, 9 of 9.** Three bad test recipes were rejected, including a sales pitch that appears
-  only after a trigger phrase.
+- **Review, 9 of 9.** Three bad test recipes were rejected, one with a pitch behind a trigger phrase.
 
 ## How a site gets an adapter
 
